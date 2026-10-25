@@ -59,16 +59,24 @@ jobs:
           name: api
 
       - name: Deploy to App Service
+        id: deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ vars.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: api.zip
 
+      # Use the address the deploy reports: with "secure unique default hostname" it isn't <name>.azurewebsites.net.
       - name: Wait for the health check
+        env:
+          WEBAPP_URL: ${{ steps.deploy.outputs.webapp-url }}
         run: |
+          if [ -z "$WEBAPP_URL" ]; then
+            echo "The deploy step reported no web app address. Check the AZURE_WEBAPP_NAME variable." >&2
+            exit 1
+          fi
           for i in $(seq 1 30); do
-            body=$(curl -fsS "https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health" || true)
+            body=$(curl -fsS "${WEBAPP_URL%/}/api/health" || true)
             echo "$body"
             case "$body" in *'"status":"ok"'*) exit 0 ;; esac
             sleep 10

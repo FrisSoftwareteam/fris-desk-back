@@ -1,0 +1,12 @@
+# Used when backend/ is its own repository (the repo-root .gitignore covers the combined checkout).
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets — never commit (the .example files are templates)
+.env
+.env.local
+.env.*.local
+
+*.log
+.DS_Store

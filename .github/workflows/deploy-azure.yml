@@ -1,0 +1,77 @@
+# Builds, tests and deploys the API to Azure App Service (Linux, Node 22).
+# Lives in backend/ because the backend is hosted from its own repository.
+#
+# One-time setup in the GitHub repository (Settings → Secrets and variables → Actions):
+#   Secret   AZURE_WEBAPP_PUBLISH_PROFILE  — Azure Portal → the web app → Overview → Download publish profile
+#                                            (paste the whole XML file)
+#   Variable AZURE_WEBAPP_NAME             — the web app's name, e.g. registrar-desk-api
+# App settings (MONGODB_URI, JWT_SECRET, …) live in Azure, never here. See DEPLOYMENT.md.
+
+name: Deploy API to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # Ship only what the server runs: compiled code and production dependencies.
+      - name: Package
+        run: |
+          npm prune --omit=dev
+          zip -qr api.zip dist node_modules package.json package-lock.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api
+          path: api.zip
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: api
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: api.zip
+
+      - name: Wait for the health check
+        run: |
+          for i in $(seq 1 30); do
+            body=$(curl -fsS "https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health" || true)
+            echo "$body"
+            case "$body" in *'"status":"ok"'*) exit 0 ;; esac
+            sleep 10
+          done
+          echo "The API did not report healthy within 5 minutes" >&2
+          exit 1

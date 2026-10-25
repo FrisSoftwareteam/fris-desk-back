@@ -1,0 +1,52 @@
+{
+  "name": "registrar-desk-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Registrar Desk API — Express + TypeScript + MongoDB.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "graph:check": "tsx --env-file-if-exists=.env scripts/graph-check.ts",
+    "seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
+    "snippets:rebuild": "tsx --env-file-if-exists=.env scripts/rebuild-snippets.ts",
+    "attachments:migrate": "tsx --env-file-if-exists=.env scripts/migrate-attachments.ts",
+    "sla:recalculate": "tsx --env-file-if-exists=.env scripts/sla-recalculate.ts",
+    "rules:apply": "tsx --env-file-if-exists=.env scripts/apply-rules.ts",
+    "indexes:sync": "tsx --env-file-if-exists=.env scripts/sync-indexes.ts"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^7.1.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jose": "^6.2.12",
+    "mongoose": "^9.11.2",
+    "multer": "^2.4.0",
+    "node-cron": "^4.6.0",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "sanitize-html": "^2.18.1",
+    "socket.io": "^4.8.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@microsoft/microsoft-graph-types": "^2.43.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.5",
+    "@types/sanitize-html": "^2.16.2",
+    "pino-pretty": "^13.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

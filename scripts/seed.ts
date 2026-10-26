@@ -106,11 +106,13 @@ if ((await SlaPolicyModel.countDocuments()) === 0) {
   console.log('SLA policies already exist — skipped');
 }
 
-// Sample filing rules: subject keywords → folder + category. They never send mail or assign.
+// Sample filing rules: subject keywords → folder + category. They never send mail or assign, so they
+// start switched off: a rule that's on must assign officers (Admin → Rules).
 if ((await AssignmentRuleModel.countDocuments()) === 0) {
   const file = async (name: string, priority: number, keyword: string, folder: string, category: string | null) => ({
     name,
     priority,
+    isActive: false,
     conditions: [{ field: 'subject', op: 'contains', value: keyword }],
     action: {
       setFolderId: await folderId(folder),
@@ -130,7 +132,7 @@ if ((await AssignmentRuleModel.countDocuments()) === 0) {
     file('Share certificate', 60, 'certificate', 'Share Certificates', null),
   ]);
   await AssignmentRuleModel.insertMany(rules);
-  console.log(`Created ${rules.length} sample filing rules`);
+  console.log(`Created ${rules.length} sample filing rules (switched off until officers are chosen)`);
 } else {
   console.log('Rules already exist — skipped');
 }

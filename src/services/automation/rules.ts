@@ -97,6 +97,19 @@ export function decideRouting(rules: RuleLike[], mail: IncomingMail): RoutingDec
   return decision;
 }
 
+/**
+ * Officers reserved by an active "assign to one officer" rule (id → rule name). Officer pools skip
+ * them, so a dedicated officer only gets enquiries from the rule that names them.
+ */
+export function dedicatedOfficers(rules: RuleLike[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rules) {
+    if (r.isActive && r.action.assignStrategy === 'specific' && r.action.assigneeId && !out.has(r.action.assigneeId))
+      out.set(r.action.assigneeId, r.name);
+  }
+  return out;
+}
+
 export interface PoolPickInput {
   pool: string[];
   /** Where this pick starts in the pool (already advanced by one for the next pick). */

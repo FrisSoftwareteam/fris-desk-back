@@ -465,8 +465,10 @@ export type AssignmentMode = (typeof ASSIGNMENT_MODES)[number];
 
 export interface SettingsDto {
   autoAcknowledge: { enabled: boolean; templateId: string | null };
-  /** Master switch for automatic assignment from routing rules' officer pools. */
+  /** Master switch for automatic assignment (rules' officer pools and the default pool). */
   roundRobinEnabled: boolean;
+  /** Officers who get new email enquiries that no rule assigns; required while assignment is on. */
+  defaultPool: string[];
   assignmentMode: AssignmentMode;
   /** Open-enquiry limit per officer for `capped_round_robin` (1–200). */
   workloadCap: number;

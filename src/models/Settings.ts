@@ -15,6 +15,9 @@ const settingsSchema = new Schema(
     // How a rule's officer pool picks someone (ASSIGNMENT_MODES) and the cap for capped_round_robin.
     assignmentMode: { type: String, enum: ASSIGNMENT_MODES, default: 'round_robin' },
     workloadCap: { type: Number, default: 15, min: 1, max: 200 },
+    // Officers who get new email enquiries that no rule assigns (required while roundRobinEnabled).
+    defaultPool: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] },
+    defaultPoolCursor: { type: Number, required: true, default: 0 },
     // Priority given to new enquiries that no rule sets otherwise.
     defaultPriority: { type: String, enum: ['normal', 'high'], default: 'normal' },
     // Opening words of external-sender notices to hide from list previews (Admin → Settings).

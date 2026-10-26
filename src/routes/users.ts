@@ -5,6 +5,7 @@ import { ROLES, type AdminUserDto } from '../shared.js';
 import { HttpError, parseBody, parsePatch } from '../lib/http.js';
 import { audit } from '../models/AuditLog.js';
 import { AssignmentRuleModel } from '../models/AssignmentRule.js';
+import { SettingsModel } from '../models/Settings.js';
 import { SlaPolicyModel } from '../models/SlaPolicy.js';
 import { TicketModel } from '../models/Ticket.js';
 import { UserModel, type User } from '../models/User.js';
@@ -131,15 +132,17 @@ usersRouter.delete('/admin/users/:id', ...admins, async (req, res) => {
     throw new HttpError(400, 'Only people who haven’t signed in yet can be removed. Disable the account instead.');
   }
 
-  const [assigned, inPool, slaContact] = await Promise.all([
+  const [assigned, inPool, inDefaultPool, slaContact] = await Promise.all([
     TicketModel.exists({ assigneeId: user._id }),
     AssignmentRuleModel.exists({ roundRobinPool: user._id }),
+    SettingsModel.exists({ _id: 'app', defaultPool: user._id }),
     SlaPolicyModel.exists({ escalateToUserId: user._id }),
   ]);
-  if (assigned || inPool || slaContact) {
+  if (assigned || inPool || inDefaultPool || slaContact) {
     const where = [
       assigned && 'enquiries are assigned to them',
       inPool && 'they are in an assignment rule',
+      inDefaultPool && 'they are in the default officer pool in Settings',
       slaContact && 'an SLA policy escalates to them',
     ].filter(Boolean);
     throw new HttpError(409, `Can’t remove: ${where.join(', ')}. Change those first, or disable the account instead.`);

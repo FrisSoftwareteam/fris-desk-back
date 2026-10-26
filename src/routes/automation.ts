@@ -27,6 +27,7 @@ import { getUserNames } from '../services/auth/userCache.js';
 import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js';
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
 import { invalidateRules } from '../services/automation/routing.js';
+import { dedicatedOfficers } from '../services/automation/rules.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
 
 // Routing rules, SLA policies and settings (BUILD_SPEC §7). Admins manage them (screens: Phase 7);
@@ -41,35 +42,44 @@ const admins = [requireAuth, requireRole('admin')];
 
 // ── Routing rules ────────────────────────────────────────────────────────────
 
-const RuleBody = z.object({
-  name: z.string().trim().min(1).max(120),
-  priority: z.number().int().min(0).max(100_000).default(100),
-  isActive: z.boolean().default(true),
-  conditions: z
-    .array(
-      z.object({
-        field: z.enum(['subject', 'fromEmail', 'fromDomain', 'body']),
-        op: z.enum(['contains', 'equals']),
-        value: z.string().trim().min(1).max(300),
-      }),
-    )
-    .min(1, 'Add at least one condition')
-    .max(10),
-  action: z
-    .object({
-      setFolderId: objectId.nullable().default(null),
-      addCategoryIds: z.array(objectId).max(10).default([]),
-      assignStrategy: z.enum(['round_robin', 'specific']).nullable().default(null),
-      assigneeId: objectId.nullable().default(null),
-      redirectTo: z.email().nullable().default(null),
-    })
-    .refine((a) => a.assignStrategy !== 'specific' || a.assigneeId, 'Choose who to assign to')
-    .refine(
-      (a) => a.setFolderId || a.addCategoryIds.length || a.assignStrategy || a.redirectTo,
-      'The rule must do something: set a folder, add a category, assign or redirect',
-    ),
-  roundRobinPool: z.array(objectId).max(100).default([]),
-});
+const RuleBody = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    priority: z.number().int().min(0).max(100_000).default(100),
+    isActive: z.boolean().default(true),
+    conditions: z
+      .array(
+        z.object({
+          field: z.enum(['subject', 'fromEmail', 'fromDomain', 'body']),
+          op: z.enum(['contains', 'equals']),
+          value: z.string().trim().min(1).max(300),
+        }),
+      )
+      .min(1, 'Add at least one condition')
+      .max(10),
+    action: z
+      .object({
+        setFolderId: objectId.nullable().default(null),
+        addCategoryIds: z.array(objectId).max(10).default([]),
+        assignStrategy: z.enum(['round_robin', 'specific']).nullable().default(null),
+        assigneeId: objectId.nullable().default(null),
+        redirectTo: z.email().nullable().default(null),
+      })
+      .refine((a) => a.assignStrategy !== 'specific' || a.assigneeId, 'Choose who to assign to')
+      .refine(
+        (a) => a.setFolderId || a.addCategoryIds.length || a.assignStrategy || a.redirectTo,
+        'The rule must do something: set a folder, add a category, assign or redirect',
+      ),
+    roundRobinPool: z.array(objectId).max(100).default([]),
+  })
+  .refine(
+    (r) => !r.isActive || r.action.assignStrategy,
+    "A rule that's switched on must assign an officer or a pool of officers",
+  )
+  .refine(
+    (r) => r.action.assignStrategy !== 'round_robin' || r.roundRobinPool.length > 0,
+    'Choose the officers to rotate between',
+  );
 
 function toRuleDto(r: AssignmentRule & { _id: Types.ObjectId }): AssignmentRuleDto {
   return {
@@ -102,26 +112,61 @@ function ruleDoc(body: z.infer<typeof RuleBody>) {
   };
 }
 
+/**
+ * Officers named by an active "assign to one officer" rule can't join a pool (a rule's, or the
+ * default one in Settings). Members already in the stored pool (`kept`) may stay, since routing
+ * skips them, so older pools can still be edited.
+ */
+async function assertPoolFree(pool: string[], kept: string[], exceptRuleId: Types.ObjectId | null) {
+  if (pool.length === 0) return;
+  const others = await AssignmentRuleModel.find(
+    { _id: { $ne: exceptRuleId }, isActive: true, 'action.assignStrategy': 'specific' },
+    { name: 1, isActive: 1, action: 1 },
+  ).lean();
+  const reserved = dedicatedOfficers(
+    others.map((r) => ({
+      id: r._id.toString(),
+      name: r.name,
+      priority: 0,
+      isActive: r.isActive,
+      conditions: [],
+      action: { assignStrategy: r.action?.assignStrategy ?? null, assigneeId: str(r.action?.assigneeId) },
+    })),
+  );
+  const clash = pool.find((id) => reserved.has(id) && !kept.includes(id));
+  if (clash) {
+    const name = (await getUserNames()).get(clash) ?? 'An officer';
+    throw new HttpError(
+      400,
+      `${name} is assigned directly by the rule "${reserved.get(clash)}", so they can't join a pool`,
+    );
+  }
+}
+
 automationRouter.get('/assignment-rules', ...readers, async (_req, res) => {
   const rules = await AssignmentRuleModel.find().sort({ priority: 1, name: 1 }).lean();
   res.json(rules.map((r) => toRuleDto(r as AssignmentRule & { _id: Types.ObjectId })));
 });
 
 automationRouter.post('/assignment-rules', ...admins, async (req, res) => {
-  const rule = await AssignmentRuleModel.create(ruleDoc(parseBody(RuleBody, req)));
+  const body = parseBody(RuleBody, req);
+  if (body.action.assignStrategy === 'round_robin') await assertPoolFree(body.roundRobinPool, [], null);
+  const rule = await AssignmentRuleModel.create(ruleDoc(body));
   invalidateRules();
   await audit({ actorId: currentUser(req)._id, action: 'rule.created', meta: { ruleId: rule._id, name: rule.name } });
   res.status(201).json(toRuleDto(rule.toObject()));
 });
 
 automationRouter.put('/assignment-rules/:id', ...admins, async (req, res) => {
-  const rule = await AssignmentRuleModel.findByIdAndUpdate(
-    objectId.parse(req.params.id),
-    ruleDoc(parseBody(RuleBody, req)),
-    {
-      returnDocument: 'after',
-    },
-  ).lean();
+  const id = new Types.ObjectId(objectId.parse(req.params.id));
+  const body = parseBody(RuleBody, req);
+  if (body.action.assignStrategy === 'round_robin') {
+    const existing = await AssignmentRuleModel.findById(id, { roundRobinPool: 1 }).lean();
+    await assertPoolFree(body.roundRobinPool, (existing?.roundRobinPool ?? []).map(String), id);
+  }
+  const rule = await AssignmentRuleModel.findByIdAndUpdate(id, ruleDoc(body), {
+    returnDocument: 'after',
+  }).lean();
   if (!rule) throw new HttpError(404, 'Rule not found');
   invalidateRules();
   await audit({ actorId: currentUser(req)._id, action: 'rule.updated', meta: { ruleId: rule._id, name: rule.name } });
@@ -248,6 +293,7 @@ function toSettingsDto(s: Awaited<ReturnType<typeof getSettings>>): SettingsDto 
   return {
     autoAcknowledge: { enabled: s.autoAcknowledge?.enabled ?? false, templateId: str(s.autoAcknowledge?.templateId) },
     roundRobinEnabled: s.roundRobinEnabled,
+    defaultPool: (s.defaultPool ?? []).map(String),
     assignmentMode: (s.assignmentMode as SettingsDto['assignmentMode']) ?? 'round_robin',
     workloadCap: s.workloadCap ?? 15,
     defaultPriority: (s.defaultPriority as SettingsDto['defaultPriority']) ?? 'normal',
@@ -267,6 +313,7 @@ const SettingsBody = z
   .object({
     autoAcknowledge: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
     roundRobinEnabled: z.boolean(),
+    defaultPool: z.array(objectId).max(100),
     assignmentMode: z.enum(ASSIGNMENT_MODES),
     workloadCap: z.number().int().min(1).max(200),
     defaultPriority: z.enum(TICKET_PRIORITIES),
@@ -295,7 +342,13 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
   if (body.autoAcknowledge?.templateId && !(await TemplateModel.exists({ _id: body.autoAcknowledge.templateId }))) {
     throw new HttpError(400, 'Template not found');
   }
-  await getSettings();
+  const current = await getSettings();
+  const storedPool = (current.defaultPool ?? []).map(String);
+  const pool = body.defaultPool ?? storedPool;
+  if ((body.roundRobinEnabled ?? current.roundRobinEnabled) && pool.length === 0) {
+    throw new HttpError(400, 'Choose the officers who get new enquiries before turning on automatic assignment');
+  }
+  if (body.defaultPool) await assertPoolFree(body.defaultPool, storedPool, null);
   await SettingsModel.updateOne(
     { _id: 'app' },
     {
@@ -305,6 +358,7 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
           'autoAcknowledge.templateId': oid(body.autoAcknowledge.templateId),
         }),
         ...(body.roundRobinEnabled !== undefined && { roundRobinEnabled: body.roundRobinEnabled }),
+        ...(body.defaultPool && { defaultPool: body.defaultPool.map((u) => new Types.ObjectId(u)) }),
         ...(body.assignmentMode && { assignmentMode: body.assignmentMode }),
         ...(body.workloadCap !== undefined && { workloadCap: body.workloadCap }),
         ...(body.defaultPriority && { defaultPriority: body.defaultPriority }),

@@ -1,12 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  decideRouting,
-  dedicatedOfficers,
-  pickFromPool,
-  ruleMatches,
-  type RuleLike,
-} from '../src/services/automation/rules.ts';
+import { decideRouting, pickFromPool, ruleMatches, type RuleLike } from '../src/services/automation/rules.ts';
 import { addBusinessMinutes } from '../src/services/automation/businessHours.ts';
 import { automatedReason } from '../src/services/automation/automatedMail.ts';
 
@@ -176,31 +170,13 @@ describe('pickFromPool', () => {
     assert.deepEqual(pick(0, { mode: 'capped_round_robin', cap: 10, loads }), { userId: 'c', advance: 2 });
   });
 
-  it('never picks an officer reserved by a one-officer rule, whatever the method', () => {
-    const reserved = new Set(['a']);
-    const isActive = (id: string) => !reserved.has(id);
-    const loads = new Map([
-      ['a', 0],
-      ['b', 5],
-      ['c', 20],
-    ]);
-    assert.equal(pick(0, { isActive })!.userId, 'b');
-    assert.equal(pick(0, { mode: 'least_loaded', loads, isActive })!.userId, 'b');
-    assert.equal(pick(0, { mode: 'capped_round_robin', cap: 10, loads, isActive })!.userId, 'b');
-    assert.equal(pickFromPool({ pool: ['a'], cursor: 0, isActive, mode: 'round_robin' }), null);
-  });
-});
-
-describe('dedicatedOfficers', () => {
-  it('lists officers named by active one-officer rules and ignores pools and switched-off rules', () => {
-    const c = [{ field: 'subject' as const, op: 'contains' as const, value: 'x' }];
-    const map = dedicatedOfficers([
-      rule({ name: 'vip', conditions: c, action: { assignStrategy: 'specific', assigneeId: 'u1' } }),
-      rule({ name: 'off', isActive: false, conditions: c, action: { assignStrategy: 'specific', assigneeId: 'u2' } }),
-      rule({ name: 'pool', conditions: c, action: { assignStrategy: 'round_robin', assigneeId: 'u3' } }),
-      rule({ name: 'none', conditions: c, action: { assignStrategy: 'specific', assigneeId: null } }),
-    ]);
-    assert.deepEqual([...map], [['u1', 'vip']]);
+  it('a one-officer pool gives every enquiry to that officer, whatever the method', () => {
+    for (const mode of ['round_robin', 'least_loaded', 'capped_round_robin'] as const) {
+      for (const cursor of [0, 1, 7]) {
+        const p = pickFromPool({ pool: ['a'], cursor, isActive: () => true, mode, cap: 1, loads: new Map([['a', 3]]) });
+        assert.deepEqual(p, { userId: 'a', advance: 0 });
+      }
+    }
   });
 });
 

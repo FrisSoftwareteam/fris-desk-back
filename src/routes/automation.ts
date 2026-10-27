@@ -27,7 +27,6 @@ import { getUserNames } from '../services/auth/userCache.js';
 import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js';
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
 import { invalidateRules } from '../services/automation/routing.js';
-import { dedicatedOfficers } from '../services/automation/rules.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
 
 // Routing rules, SLA policies and settings (BUILD_SPEC §7). Admins manage them (screens: Phase 7);
@@ -112,37 +111,6 @@ function ruleDoc(body: z.infer<typeof RuleBody>) {
   };
 }
 
-/**
- * Officers named by an active "assign to one officer" rule can't join a pool (a rule's, or the
- * default one in Settings). Members already in the stored pool (`kept`) may stay, since routing
- * skips them, so older pools can still be edited.
- */
-async function assertPoolFree(pool: string[], kept: string[], exceptRuleId: Types.ObjectId | null) {
-  if (pool.length === 0) return;
-  const others = await AssignmentRuleModel.find(
-    { _id: { $ne: exceptRuleId }, isActive: true, 'action.assignStrategy': 'specific' },
-    { name: 1, isActive: 1, action: 1 },
-  ).lean();
-  const reserved = dedicatedOfficers(
-    others.map((r) => ({
-      id: r._id.toString(),
-      name: r.name,
-      priority: 0,
-      isActive: r.isActive,
-      conditions: [],
-      action: { assignStrategy: r.action?.assignStrategy ?? null, assigneeId: str(r.action?.assigneeId) },
-    })),
-  );
-  const clash = pool.find((id) => reserved.has(id) && !kept.includes(id));
-  if (clash) {
-    const name = (await getUserNames()).get(clash) ?? 'An officer';
-    throw new HttpError(
-      400,
-      `${name} is assigned directly by the rule "${reserved.get(clash)}", so they can't join a pool`,
-    );
-  }
-}
-
 automationRouter.get('/assignment-rules', ...readers, async (_req, res) => {
   const rules = await AssignmentRuleModel.find().sort({ priority: 1, name: 1 }).lean();
   res.json(rules.map((r) => toRuleDto(r as AssignmentRule & { _id: Types.ObjectId })));
@@ -150,7 +118,6 @@ automationRouter.get('/assignment-rules', ...readers, async (_req, res) => {
 
 automationRouter.post('/assignment-rules', ...admins, async (req, res) => {
   const body = parseBody(RuleBody, req);
-  if (body.action.assignStrategy === 'round_robin') await assertPoolFree(body.roundRobinPool, [], null);
   const rule = await AssignmentRuleModel.create(ruleDoc(body));
   invalidateRules();
   await audit({ actorId: currentUser(req)._id, action: 'rule.created', meta: { ruleId: rule._id, name: rule.name } });
@@ -160,10 +127,6 @@ automationRouter.post('/assignment-rules', ...admins, async (req, res) => {
 automationRouter.put('/assignment-rules/:id', ...admins, async (req, res) => {
   const id = new Types.ObjectId(objectId.parse(req.params.id));
   const body = parseBody(RuleBody, req);
-  if (body.action.assignStrategy === 'round_robin') {
-    const existing = await AssignmentRuleModel.findById(id, { roundRobinPool: 1 }).lean();
-    await assertPoolFree(body.roundRobinPool, (existing?.roundRobinPool ?? []).map(String), id);
-  }
   const rule = await AssignmentRuleModel.findByIdAndUpdate(id, ruleDoc(body), {
     returnDocument: 'after',
   }).lean();
@@ -348,7 +311,6 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
   if ((body.roundRobinEnabled ?? current.roundRobinEnabled) && pool.length === 0) {
     throw new HttpError(400, 'Choose the officers who get new enquiries before turning on automatic assignment');
   }
-  if (body.defaultPool) await assertPoolFree(body.defaultPool, storedPool, null);
   await SettingsModel.updateOne(
     { _id: 'app' },
     {

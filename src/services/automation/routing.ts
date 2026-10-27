@@ -7,7 +7,7 @@ import { TicketModel, type TicketDoc } from '../../models/Ticket.js';
 import { UserModel } from '../../models/User.js';
 import { invalidateUsers } from '../auth/userCache.js';
 import { deliverEmail } from '../mail/send.js';
-import { decideRouting, dedicatedOfficers, pickFromPool, type IncomingMail, type RuleLike } from './rules.js';
+import { decideRouting, pickFromPool, type IncomingMail, type RuleLike } from './rules.js';
 import { OPEN_TICKET_STATUSES, type AssignmentMode } from '../../shared.js';
 
 type Rule = AssignmentRule & { _id: Types.ObjectId };
@@ -86,9 +86,9 @@ const defaultPool: PoolSource = {
 
 /**
  * Picks the next officer from a pool (a rule's, or the default one in Settings) using the assignment
- * method chosen in Settings. Officers reserved by an active "assign to one officer" rule are skipped.
+ * method chosen in Settings. Disabled accounts are skipped.
  */
-async function nextPoolOfficer(source: PoolSource, mode: AssignmentMode, cap: number, reserved: Set<string>) {
+async function nextPoolOfficer(source: PoolSource, mode: AssignmentMode, cap: number) {
   const before = await source.advance(1);
   const pool = before?.pool ?? [];
   if (pool.length === 0) return null;
@@ -98,7 +98,7 @@ async function nextPoolOfficer(source: PoolSource, mode: AssignmentMode, cap: nu
   const pick = pickFromPool({
     pool,
     cursor: before!.cursor,
-    isActive: (id) => active.has(id) && !reserved.has(id),
+    isActive: (id) => active.has(id),
     mode,
     cap,
     ...(mode !== 'round_robin' && { loads: await openLoads(pool) }),
@@ -132,18 +132,17 @@ export async function routeNewTicket(ticket: TicketDoc, mail: IncomingMail) {
   const rule = decision.assignmentRule;
   const mode = (settings.assignmentMode ?? 'round_robin') as AssignmentMode;
   const cap = settings.workloadCap ?? 15;
-  const reserved = new Set(dedicatedOfficers(likes).keys());
   if (rule?.action.assignStrategy === 'specific' && rule.action.assigneeId) {
     const ok = await UserModel.exists({ _id: rule.action.assigneeId, isActive: true });
     if (ok) assignee = new Types.ObjectId(rule.action.assigneeId);
     assignedBy = `${rule.name} (specific)`;
   } else if (rule?.action.assignStrategy === 'round_robin' && settings.roundRobinEnabled) {
-    assignee = await nextPoolOfficer(rulePool(new Types.ObjectId(rule.id)), mode, cap, reserved);
+    assignee = await nextPoolOfficer(rulePool(new Types.ObjectId(rule.id)), mode, cap);
     assignedBy = `${rule.name} (${mode})`;
   }
   // Nobody assigned by a rule (no match, or its officers are unavailable): use the default pool.
   if (!assignee && usesDefaultPool) {
-    assignee = await nextPoolOfficer(defaultPool, mode, cap, reserved);
+    assignee = await nextPoolOfficer(defaultPool, mode, cap);
     if (assignee) assignedBy = `Default pool (${mode})`;
   }
   if (assignee) {

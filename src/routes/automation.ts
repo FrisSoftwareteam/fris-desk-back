@@ -27,6 +27,7 @@ import { getUserNames } from '../services/auth/userCache.js';
 import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js';
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
 import { invalidateRules } from '../services/automation/routing.js';
+import { previewOutlookMatch, startOutlookMatch } from '../services/mail/outlookMatch.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
 
 // Routing rules, SLA policies and settings (BUILD_SPEC §7). Admins manage them (screens: Phase 7);
@@ -335,6 +336,16 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
   invalidateSettings();
   await audit({ actorId: currentUser(req)._id, action: 'settings.updated', meta: { changes: body } });
   res.json(toSettingsDto(await getSettings()));
+});
+
+// Make active enquiries match unread mail in the shared Inbox (one-off switchover from Outlook).
+automationRouter.get('/settings/outlook-match', ...admins, async (_req, res) => {
+  res.json(await previewOutlookMatch());
+});
+
+automationRouter.post('/settings/outlook-match', ...admins, async (req, res) => {
+  startOutlookMatch(currentUser(req));
+  res.status(202).json(await previewOutlookMatch());
 });
 
 // ── Ticket history ───────────────────────────────────────────────────────────

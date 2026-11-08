@@ -25,3 +25,8 @@ export function parsePatch<S extends z.ZodType>(schema: S, req: Request): Partia
   const sent = new Set(Object.keys((req.body ?? {}) as object));
   return Object.fromEntries(Object.entries(parsed).filter(([k]) => sent.has(k))) as Partial<z.infer<S>>;
 }
+
+/** Escapes text typed by a user so it matches literally inside a RegExp. */
+export function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

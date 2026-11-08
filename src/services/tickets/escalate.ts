@@ -29,7 +29,8 @@ export async function escalateTicket(
 ): Promise<void> {
   if (ticket.status === 'resolved') throw new HttpError(400, 'Reopen the enquiry before escalating it');
   const to: EmailAddress[] = [{ name: department.name, email: department.email }];
-  assertRecipientsAllowed(to);
+  const cc: EmailAddress[] = department.cc ? [{ name: '', email: department.cc }] : [];
+  assertRecipientsAllowed([...to, ...cc]);
 
   const thread = await MessageModel.find({ ticketId: ticket._id, direction: { $ne: 'note' } }).sort({ sentAt: 1 });
   const base = thread.filter((m) => m.graphMessageId).at(-1) ?? null;
@@ -54,7 +55,7 @@ export async function escalateTicket(
     baseGraphMessageId: base?.graphMessageId ?? null,
     kind: 'forward',
     to,
-    cc: [],
+    cc,
     subject: subjectWithReference(subject, ticket.reference),
     bodyHtml,
   });
@@ -66,9 +67,11 @@ export async function escalateTicket(
     direction: 'note',
     from: { name: user.displayName, email: user.email },
     bodyHtml:
-      `<p>Escalated to <b>${escapeHtml(department.name)}</b> (${escapeHtml(department.email)}) by ` +
+      `<p>Escalated to <b>${escapeHtml(department.name)}</b> (${escapeHtml(department.email)})` +
+      (department.cc ? `, cc ${escapeHtml(department.cc)},` : '') +
+      ` by ` +
       `${escapeHtml(user.displayName)}.</p>${noteHtml}`,
-    bodyText: `Escalated to ${department.name} (${department.email}) by ${user.displayName}. ${noteText}`.trim(),
+    bodyText: `Escalated to ${department.name} (${department.email})${department.cc ? `, cc ${department.cc},` : ''} by ${user.displayName}. ${noteText}`.trim(),
     authorId: user._id,
     sentAt: now,
   });
@@ -89,6 +92,7 @@ export async function escalateTicket(
       departmentId: department._id,
       department: department.name,
       to: department.email,
+      cc: department.cc || undefined,
       hasNote: Boolean(noteText),
       statusBefore: before,
     },

@@ -53,7 +53,12 @@ async function findTicket(conversationId: string | null | undefined, subject: st
  * Imports one Inbox message as a ticket message. Idempotent: a message already imported is skipped.
  * Read-only towards the mailbox — it never marks mail as read, moves or changes it.
  */
-export async function ingestMessage(graph: GraphService, graphMessageId: string): Promise<IngestResult> {
+export async function ingestMessage(
+  graph: GraphService,
+  graphMessageId: string,
+  // quiet: back-filling old mail, so no auto-acknowledgement or redirect emails go out.
+  { quiet = false }: { quiet?: boolean } = {},
+): Promise<IngestResult> {
   if (await MessageModel.exists({ graphMessageId })) return 'duplicate';
 
   const msg: GraphMessage = await graph.getMessage(graphMessageId);
@@ -113,7 +118,9 @@ export async function ingestMessage(graph: GraphService, graphMessageId: string)
     // Don't leave an empty ticket or stray attachments behind; the next sync retries the message.
     await attachmentStore
       .remove(attachments.map((a) => new Types.ObjectId(a.id)))
-      .catch((cleanupErr: unknown) => logger.warn({ err: cleanupErr }, 'Could not remove attachments of a failed import'));
+      .catch((cleanupErr: unknown) =>
+        logger.warn({ err: cleanupErr }, 'Could not remove attachments of a failed import'),
+      );
     if (isNewTicket) await TicketModel.deleteOne({ _id: ticket._id, messageCount: 0 });
     // Duplicate key: a concurrent sync imported this message first.
     if ((err as { code?: number }).code === 11000) return 'duplicate';
@@ -161,7 +168,7 @@ export async function ingestMessage(graph: GraphService, graphMessageId: string)
       meta: { before, after: { status: ticket.status }, reason: 'shareholder replied' },
     });
   }
-  if (isNewTicket) {
+  if (isNewTicket && !quiet) {
     // Both send mail; failures are logged/audited inside and never undo the import.
     if (redirects.length) await runRedirects(ticket, graphMessageId, redirects);
     await autoAcknowledge(ticket, { receivedAt, graphMessageId, headers: msg.internetMessageHeaders ?? [] }).catch(

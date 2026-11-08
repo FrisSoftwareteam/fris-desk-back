@@ -46,8 +46,26 @@ function formatterFor(tz: string): Intl.DateTimeFormat {
   return f;
 }
 
+type LocalParts = { y: number; mo: number; d: number; weekday: number; minute: number };
+
+// Day walks ask for the same local midnights over and over (formatToParts is ~15µs a call), so
+// remember results; cleared when full rather than LRU, which is plenty for a few years of days.
+const partsCache = new Map<string, LocalParts>();
+const PARTS_CACHE_MAX = 50_000;
+
 /** Local calendar date, ISO weekday and minute-of-day of an instant in a time zone. */
-function localParts(at: Date, tz: string) {
+function localParts(at: Date, tz: string): LocalParts {
+  const key = `${tz}|${at.getTime()}`;
+  let p = partsCache.get(key);
+  if (!p) {
+    if (partsCache.size >= PARTS_CACHE_MAX) partsCache.clear();
+    p = computeLocalParts(at, tz);
+    partsCache.set(key, p);
+  }
+  return p;
+}
+
+function computeLocalParts(at: Date, tz: string): LocalParts {
   const parts = Object.fromEntries(
     formatterFor(tz)
       .formatToParts(at)

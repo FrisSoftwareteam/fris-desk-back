@@ -19,6 +19,7 @@ const objectId = z.string().refine((s) => Types.ObjectId.isValid(s), 'Invalid id
 const DepartmentBody = z.object({
   name: z.string().trim().min(1).max(120),
   email: z.email('Enter a valid email address').max(320),
+  cc: z.union([z.literal(''), z.email('Enter a valid CC address').max(320)]).default(''),
   type: z.enum(DEPARTMENT_TYPES).default('department'),
   description: z.string().trim().max(300).default(''),
   order: z.number().int().min(0).max(10_000).default(0),
@@ -30,6 +31,7 @@ function toDto(d: Department & { _id: Types.ObjectId }): DepartmentDto {
     id: d._id.toString(),
     name: d.name,
     email: d.email,
+    cc: d.cc ?? '',
     type: d.type,
     description: d.description,
     order: d.order,

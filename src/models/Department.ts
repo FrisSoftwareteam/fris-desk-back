@@ -6,6 +6,8 @@ const departmentSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, lowercase: true, trim: true },
+    // Optional address copied on every escalation here ('' = none).
+    cc: { type: String, default: '', lowercase: true, trim: true },
     type: { type: String, enum: DEPARTMENT_TYPES, required: true, default: 'department' },
     // When to escalate here; shown as a hint in the Escalate menu.
     description: { type: String, default: '' },

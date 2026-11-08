@@ -590,6 +590,8 @@ export interface DepartmentDto {
   id: string;
   name: string;
   email: string;
+  /** Optional address copied on every escalation; '' when none. */
+  cc: string;
   type: DepartmentType;
   /** When to escalate here; shown as a hint in the Escalate menu. */
   description: string;
@@ -741,3 +743,44 @@ export interface HealthResponse {
   version: string;
   timestamp: string;
 }
+
+/** GET/POST /api/settings/outlook-match — make active enquiries match unread mail in the shared Inbox. */
+export interface OutlookMatchResultDto {
+  finishedAt: string;
+  imported: number;
+  resolved: number;
+  reopened: number;
+  failed: number;
+  error: string | null;
+}
+
+export interface OutlookMatchDto {
+  toResolve: number;
+  toReopen: number;
+  toImport: number;
+  running: boolean;
+  lastResult: OutlookMatchResultDto | null;
+}
+
+// ── Shareholder records (GAP_ANALYSIS G-01.1) ────────────────────────────────
+
+/** One company a shareholder holds shares in, with their CHN and CSCS number for it. */
+export interface ShareholderHoldingDto {
+  company: string;
+  chn: string;
+  cscsNumber: string;
+}
+
+/** A saved shareholder record. Email is empty for phone / walk-in shareholders. */
+export interface ShareholderDto {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  holdings: ShareholderHoldingDto[];
+  updatedAt: string;
+}
+
+/** POST /api/shareholders and PATCH /api/shareholders/:id */
+export type ShareholderInput = Omit<ShareholderDto, 'id' | 'updatedAt'>;

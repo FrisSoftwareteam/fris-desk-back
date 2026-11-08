@@ -115,6 +115,22 @@ export class GraphService {
     return { messages: res.value, nextLink: res['@odata.nextLink'], deltaLink: res['@odata.deltaLink'] };
   }
 
+  /** Every unread Inbox message (ids only), for "Match Outlook unread mail". Read-only. */
+  async listUnreadInbox(): Promise<Pick<Message, 'id' | 'conversationId' | 'receivedDateTime' | 'isDraft'>[]> {
+    const all: Message[] = [];
+    let request = this.client
+      .api(`${this.base}/mailFolders/inbox/messages`)
+      .filter('isRead eq false')
+      .select('id,conversationId,receivedDateTime,isDraft')
+      .top(100);
+    for (;;) {
+      const res = (await request.get()) as { value: Message[]; '@odata.nextLink'?: string };
+      all.push(...res.value);
+      if (!res['@odata.nextLink']) return all;
+      request = this.client.api(res['@odata.nextLink']);
+    }
+  }
+
   getMessage(id: string): Promise<Message> {
     return this.client
       .api(`${this.base}/messages/${encodeURIComponent(id)}`)

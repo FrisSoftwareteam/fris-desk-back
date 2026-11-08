@@ -24,6 +24,7 @@ import { reportsRouter } from './routes/reports.js';
 import { usersRouter } from './routes/users.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { approvalsRouter } from './routes/approvals.js';
+import { shareholdersRouter } from './routes/shareholders.js';
 
 export function createApp() {
   const app = express();
@@ -62,6 +63,7 @@ export function createApp() {
   app.use('/api', templatesRouter);
   app.use('/api', automationRouter);
   app.use('/api', departmentsRouter);
+  app.use('/api', shareholdersRouter);
   app.use('/api', usersRouter);
   app.use('/api', reportsRouter);
   app.use('/api', notificationsRouter);

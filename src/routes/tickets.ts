@@ -9,7 +9,7 @@ import {
   type TicketCountsDto,
   type TicketListResponse,
 } from '../shared.js';
-import { HttpError, parseBody } from '../lib/http.js';
+import { HttpError, escapeRegex, parseBody } from '../lib/http.js';
 import { audit } from '../models/AuditLog.js';
 import { CategoryModel } from '../models/Category.js';
 import { DraftModel } from '../models/Draft.js';
@@ -81,10 +81,6 @@ async function searchFilter(q: string): Promise<QueryFilter<Ticket>> {
 /** Tickets where this officer has an unsent draft (drives the Drafts view and the [Draft] marker). */
 async function myDraftTicketIds(userId: Types.ObjectId): Promise<Types.ObjectId[]> {
   return DraftModel.distinct('ticketId', { authorId: userId });
-}
-
-function escapeRegex(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function encodeCursor(t: { lastMessageAt: Date; _id: Types.ObjectId }) {
@@ -162,6 +158,8 @@ function viewFilter(
 
 type ListQueryInput = z.infer<typeof ListQuery>;
 
+const SNOOZE_VISIBLE_VIEWS = new Set(['followups', 'drafts', 'mentions', 'approvals']);
+
 /**
  * The Mongo filter for what the message list shows: a view and Open/Resolved tab, a search across
  * everything, or Deleted items (supervisors and admins only). The cursor is the caller's concern.
@@ -190,8 +188,9 @@ async function listFilter(
     : deletedView
       ? []
       : [query.tab === 'resolved' ? { status: 'resolved' } : { status: { $ne: 'resolved' } }];
-  // Snoozed enquiries stay out of sight until due, except in Follow-ups and search.
-  if (!searching && !deletedView && query.view !== 'followups') and.push(snoozedHiddenFilter(new Date()));
+  // Snoozed enquiries stay out of sight until due, except in Follow-ups, search and the views of
+  // the officer's own pending work (a draft, a mention, a reply awaiting approval), which match their counts.
+  if (!searching && !deletedView && !SNOOZE_VISIBLE_VIEWS.has(query.view)) and.push(snoozedHiddenFilter(new Date()));
   return { filter, and, deletedView };
 }
 

@@ -256,6 +256,8 @@ automationRouter.delete('/sla-policies/:id', ...admins, async (req, res) => {
 function toSettingsDto(s: Awaited<ReturnType<typeof getSettings>>): SettingsDto {
   return {
     autoAcknowledge: { enabled: s.autoAcknowledge?.enabled ?? false, templateId: str(s.autoAcknowledge?.templateId) },
+    resolutionEmail: { enabled: s.resolutionEmail?.enabled ?? false, templateId: str(s.resolutionEmail?.templateId) },
+    markReadOnResolve: s.markReadOnResolve ?? false,
     roundRobinEnabled: s.roundRobinEnabled,
     defaultPool: (s.defaultPool ?? []).map(String),
     assignmentMode: (s.assignmentMode as SettingsDto['assignmentMode']) ?? 'round_robin',
@@ -276,6 +278,8 @@ automationRouter.get('/settings', ...admins, async (_req, res) => {
 const SettingsBody = z
   .object({
     autoAcknowledge: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
+    resolutionEmail: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
+    markReadOnResolve: z.boolean(),
     roundRobinEnabled: z.boolean(),
     defaultPool: z.array(objectId).max(100),
     assignmentMode: z.enum(ASSIGNMENT_MODES),
@@ -306,6 +310,12 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
   if (body.autoAcknowledge?.templateId && !(await TemplateModel.exists({ _id: body.autoAcknowledge.templateId }))) {
     throw new HttpError(400, 'Template not found');
   }
+  if (body.resolutionEmail?.enabled && !body.resolutionEmail.templateId) {
+    throw new HttpError(400, 'Choose the template to send before turning on the resolution email');
+  }
+  if (body.resolutionEmail?.templateId && !(await TemplateModel.exists({ _id: body.resolutionEmail.templateId }))) {
+    throw new HttpError(400, 'Template not found');
+  }
   const current = await getSettings();
   const storedPool = (current.defaultPool ?? []).map(String);
   const pool = body.defaultPool ?? storedPool;
@@ -320,6 +330,11 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
           'autoAcknowledge.enabled': body.autoAcknowledge.enabled,
           'autoAcknowledge.templateId': oid(body.autoAcknowledge.templateId),
         }),
+        ...(body.resolutionEmail && {
+          'resolutionEmail.enabled': body.resolutionEmail.enabled,
+          'resolutionEmail.templateId': oid(body.resolutionEmail.templateId),
+        }),
+        ...(body.markReadOnResolve !== undefined && { markReadOnResolve: body.markReadOnResolve }),
         ...(body.roundRobinEnabled !== undefined && { roundRobinEnabled: body.roundRobinEnabled }),
         ...(body.defaultPool && { defaultPool: body.defaultPool.map((u) => new Types.ObjectId(u)) }),
         ...(body.assignmentMode && { assignmentMode: body.assignmentMode }),

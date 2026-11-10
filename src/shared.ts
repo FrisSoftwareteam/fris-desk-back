@@ -465,6 +465,10 @@ export type AssignmentMode = (typeof ASSIGNMENT_MODES)[number];
 
 export interface SettingsDto {
   autoAcknowledge: { enabled: boolean; templateId: string | null };
+  /** Email to the shareholder when an officer resolves their enquiry (asks them to confirm). */
+  resolutionEmail: { enabled: boolean; templateId: string | null };
+  /** Mark an enquiry's inbound emails read in the shared mailbox when it's resolved. */
+  markReadOnResolve: boolean;
   /** Master switch for automatic assignment (rules' officer pools and the default pool). */
   roundRobinEnabled: boolean;
   /** Officers who get new email enquiries that no rule assigns; required while assignment is on. */

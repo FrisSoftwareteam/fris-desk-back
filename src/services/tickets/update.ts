@@ -6,6 +6,8 @@ import { CategoryModel } from '../../models/Category.js';
 import { FolderModel } from '../../models/Folder.js';
 import type { TicketDoc } from '../../models/Ticket.js';
 import { UserModel, type UserDoc } from '../../models/User.js';
+import { logger } from '../../lib/logger.js';
+import { markMailRead, sendResolutionEmail } from '../automation/autoAck.js';
 import { applySla } from '../automation/sla.js';
 import { getStatusReasons } from './statusReasons.js';
 import type { BulkPatch, TicketPatch } from './patchSchema.js';
@@ -60,6 +62,7 @@ export async function applyTicketPatch(
   patch: TicketPatch,
   user: UserDoc,
   reason: StatusReasonDto | null,
+  opts: { notifyContact?: boolean } = {},
 ): Promise<Record<string, Change>> {
   const changes: Record<string, Change> = {};
   const track = (field: string, before: unknown, after: unknown) => {
@@ -134,6 +137,15 @@ export async function applyTicketPatch(
   await ticket.save();
   if (Object.keys(changes).length > 0) {
     await audit({ actorId: user._id, action: 'ticket.updated', ticketId: ticket._id, meta: changes });
+  }
+  if (changes.status && ticket.status === 'resolved') {
+    markMailRead(ticket).catch((err: unknown) => logger.error({ err, ticket: ticket.reference }, 'Mark mail read failed'));
+  }
+  if (opts.notifyContact && changes.status && ticket.status === 'resolved') {
+    // In the background: a mail failure is logged and audited, never blocks the resolve.
+    sendResolutionEmail(ticket).catch((err: unknown) =>
+      logger.error({ err, ticket: ticket.reference }, 'Resolution email failed'),
+    );
   }
   return changes;
 }

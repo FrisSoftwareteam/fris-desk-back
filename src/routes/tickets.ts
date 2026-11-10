@@ -303,7 +303,7 @@ ticketsRouter.patch('/tickets/:id', async (req, res) => {
 
   const ticket = await TicketModel.findOne({ _id: id, deletedAt: null });
   if (!ticket) throw new HttpError(404, 'Enquiry not found');
-  await applyTicketPatch(ticket, patch, user, await checkPatch(patch));
+  await applyTicketPatch(ticket, patch, user, await checkPatch(patch), { notifyContact: true });
   res.json(toTicketSummary(ticket, await namesForTickets([ticket])));
 });
 
@@ -353,7 +353,7 @@ ticketsRouter.post('/tickets/bulk', async (req, res) => {
       addCategoryIds || removeCategoryIds
         ? nextCategoryIds(t.categoryIds.map(String), addCategoryIds, removeCategoryIds)
         : undefined;
-    await applyTicketPatch(t, { ...rest, ...(categoryIds && { categoryIds }) }, user, reason);
+    await applyTicketPatch(t, { ...rest, ...(categoryIds && { categoryIds }) }, user, reason, { notifyContact: true });
   });
   await audit({
     actorId: user._id,

@@ -176,6 +176,10 @@ export class GraphService {
     return this.client.api(`${this.base}/messages`).post({ body: { contentType: 'html', content: '' } });
   }
 
+  async markRead(messageId: string): Promise<void> {
+    await this.client.api(`${this.base}/messages/${encodeURIComponent(messageId)}`).patch({ isRead: true });
+  }
+
   updateDraft(draftId: string, patch: Partial<Message>): Promise<Message> {
     return this.client.api(`${this.base}/messages/${encodeURIComponent(draftId)}`).patch(patch);
   }

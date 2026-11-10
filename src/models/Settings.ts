@@ -10,6 +10,13 @@ const settingsSchema = new Schema(
       enabled: { type: Boolean, required: true, default: false },
       templateId: { type: Schema.Types.ObjectId, ref: 'Template', default: null },
     },
+    // Email sent to the shareholder when an officer resolves their enquiry.
+    resolutionEmail: {
+      enabled: { type: Boolean, required: true, default: false },
+      templateId: { type: Schema.Types.ObjectId, ref: 'Template', default: null },
+    },
+    // Mark an enquiry's inbound emails read in the shared mailbox when it's resolved.
+    markReadOnResolve: { type: Boolean, default: false },
     // Master switch for round-robin assignment by routing rules.
     roundRobinEnabled: { type: Boolean, required: true, default: true },
     // How a rule's officer pool picks someone (ASSIGNMENT_MODES) and the cap for capped_round_robin.

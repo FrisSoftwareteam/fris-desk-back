@@ -26,7 +26,7 @@ import { currentUser, requireAuth, requireRole } from '../middleware/auth.js';
 import { getUserNames } from '../services/auth/userCache.js';
 import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js';
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
-import { invalidateRules } from '../services/automation/routing.js';
+import { assignBacklog, invalidateRules, UNASSIGNED_OPEN } from '../services/automation/routing.js';
 import { previewOutlookMatch, startOutlookMatch } from '../services/mail/outlookMatch.js';
 import { clearAllData } from '../services/tickets/retention.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
@@ -362,6 +362,15 @@ automationRouter.get('/settings/outlook-match', ...admins, async (_req, res) => 
 automationRouter.post('/settings/outlook-match', ...admins, async (req, res) => {
   startOutlookMatch(currentUser(req));
   res.status(202).json(await previewOutlookMatch());
+});
+
+// Share out open enquiries nobody owns with the current assignment settings (e.g. at go-live).
+automationRouter.get('/settings/unassigned-backlog', ...admins, async (_req, res) => {
+  res.json({ count: await TicketModel.countDocuments(UNASSIGNED_OPEN) });
+});
+
+automationRouter.post('/settings/assign-backlog', ...admins, async (req, res) => {
+  res.json(await assignBacklog(currentUser(req)));
 });
 
 // Wipe all enquiry data (test data before go-live). Irreversible, so the body must spell it out.

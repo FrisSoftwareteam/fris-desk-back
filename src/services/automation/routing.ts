@@ -2,9 +2,12 @@ import { Types } from 'mongoose';
 import { logger } from '../../lib/logger.js';
 import { audit } from '../../models/AuditLog.js';
 import { AssignmentRuleModel, type AssignmentRule } from '../../models/AssignmentRule.js';
-import { getSettings, SettingsModel } from '../../models/Settings.js';
+import { getSettings, SettingsModel, type SettingsDoc } from '../../models/Settings.js';
+import { MessageModel } from '../../models/Message.js';
+import { HttpError } from '../../lib/http.js';
+import { applyTicketPatch } from '../tickets/update.js';
 import { TicketModel, type TicketDoc } from '../../models/Ticket.js';
-import { UserModel } from '../../models/User.js';
+import { UserModel, type UserDoc } from '../../models/User.js';
 import { invalidateUsers } from '../auth/userCache.js';
 import { deliverEmail } from '../mail/send.js';
 import { decideRouting, pickFromPool, type IncomingMail, type RuleLike } from './rules.js';
@@ -110,6 +113,32 @@ async function nextPoolOfficer(source: PoolSource, mode: AssignmentMode, cap: nu
 }
 
 /**
+ * Who a rule-matched enquiry goes to: the rule's specific officer or pool, else the default pool.
+ * Advances the pools' round-robin cursors.
+ */
+async function pickAssignee(rule: RuleLike | null, settings: SettingsDoc) {
+  let assignee: Types.ObjectId | null = null;
+  let assignedBy: string | null = null;
+  const usesDefaultPool = settings.roundRobinEnabled && (settings.defaultPool ?? []).length > 0;
+  const mode = (settings.assignmentMode ?? 'round_robin') as AssignmentMode;
+  const cap = settings.workloadCap ?? 15;
+  if (rule?.action.assignStrategy === 'specific' && rule.action.assigneeId) {
+    const ok = await UserModel.exists({ _id: rule.action.assigneeId, isActive: true });
+    if (ok) assignee = new Types.ObjectId(rule.action.assigneeId);
+    assignedBy = `${rule.name} (specific)`;
+  } else if (rule?.action.assignStrategy === 'round_robin' && settings.roundRobinEnabled) {
+    assignee = await nextPoolOfficer(rulePool(new Types.ObjectId(rule.id)), mode, cap);
+    assignedBy = `${rule.name} (${mode})`;
+  }
+  // Nobody assigned by a rule (no match, or its officers are unavailable): use the default pool.
+  if (!assignee && usesDefaultPool) {
+    assignee = await nextPoolOfficer(defaultPool, mode, cap);
+    if (assignee) assignedBy = `Default pool (${mode})`;
+  }
+  return { assignee, assignedBy };
+}
+
+/**
  * Applies routing rules to a brand-new email ticket (doesn't save): folder, categories, assignment
  * (specific officer or a pool). Enquiries no rule assigns go to the default pool in Settings.
  * Redirects are returned to run after the ticket is saved.
@@ -127,24 +156,7 @@ export async function routeNewTicket(ticket: TicketDoc, mail: IncomingMail) {
     if (!ticket.categoryIds.some((x) => x.toString() === c)) ticket.categoryIds.push(new Types.ObjectId(c));
   }
 
-  let assignee: Types.ObjectId | null = null;
-  let assignedBy: string | null = null;
-  const rule = decision.assignmentRule;
-  const mode = (settings.assignmentMode ?? 'round_robin') as AssignmentMode;
-  const cap = settings.workloadCap ?? 15;
-  if (rule?.action.assignStrategy === 'specific' && rule.action.assigneeId) {
-    const ok = await UserModel.exists({ _id: rule.action.assigneeId, isActive: true });
-    if (ok) assignee = new Types.ObjectId(rule.action.assigneeId);
-    assignedBy = `${rule.name} (specific)`;
-  } else if (rule?.action.assignStrategy === 'round_robin' && settings.roundRobinEnabled) {
-    assignee = await nextPoolOfficer(rulePool(new Types.ObjectId(rule.id)), mode, cap);
-    assignedBy = `${rule.name} (${mode})`;
-  }
-  // Nobody assigned by a rule (no match, or its officers are unavailable): use the default pool.
-  if (!assignee && usesDefaultPool) {
-    assignee = await nextPoolOfficer(defaultPool, mode, cap);
-    if (assignee) assignedBy = `Default pool (${mode})`;
-  }
+  const { assignee, assignedBy } = await pickAssignee(decision.assignmentRule, settings);
   if (assignee) {
     ticket.assigneeId = assignee;
     ticket.assignedAt = new Date();
@@ -168,6 +180,48 @@ export async function routeNewTicket(ticket: TicketDoc, mail: IncomingMail) {
 }
 
 /** Mail redirection: forwards the original email to the rule's address (subject to MAIL_SEND_ALLOWLIST). */
+/** The enquiries the Unassigned view lists: open and owned by nobody. */
+export const UNASSIGNED_OPEN = { assigneeId: null, deletedAt: null, status: { $ne: 'resolved' as const } };
+
+/** How many enquiries one click assigns. */
+const BACKLOG_BATCH = 200;
+
+/**
+ * Shares out existing unassigned enquiries (e.g. at go-live) the way new mail is assigned: routing
+ * rules first, then the default pool, with the chosen method. Only the assignee changes.
+ */
+export async function assignBacklog(admin: UserDoc) {
+  const settings = await getSettings();
+  if (!settings.roundRobinEnabled || (settings.defaultPool ?? []).length === 0) {
+    throw new HttpError(400, 'Turn on automatic assignment and choose the officers first');
+  }
+  // shortcut: 200 per click to stay inside request timeouts; move to a background job like outlook-match if backlogs are routinely larger.
+  const tickets = await TicketModel.find(UNASSIGNED_OPEN).sort({ createdAt: 1 }).limit(BACKLOG_BATCH);
+  const likes = (await loadRules()).map(toLike);
+  let assigned = 0;
+  let skipped = 0;
+  // One at a time: least-loaded and capped picks read each officer's load from the saved enquiries.
+  for (const ticket of tickets) {
+    const first = await MessageModel.findOne({ ticketId: ticket._id }, { bodyText: 1 }).sort({ sentAt: 1 }).lean();
+    const decision = decideRouting(likes, {
+      subject: ticket.subject,
+      fromEmail: ticket.contact?.email ?? '',
+      bodyText: first?.bodyText ?? '',
+    });
+    const { assignee } = await pickAssignee(decision.assignmentRule, settings);
+    if (!assignee) {
+      skipped++;
+      continue;
+    }
+    await applyTicketPatch(ticket, { assigneeId: assignee.toString() }, admin, null);
+    assigned++;
+  }
+  invalidateUsers();
+  const remaining = await TicketModel.countDocuments(UNASSIGNED_OPEN);
+  await audit({ actorId: admin._id, action: 'tickets.backlog_assigned', meta: { assigned, skipped, remaining } });
+  return { assigned, skipped, remaining };
+}
+
 export async function runRedirects(
   ticket: TicketDoc,
   graphMessageId: string,

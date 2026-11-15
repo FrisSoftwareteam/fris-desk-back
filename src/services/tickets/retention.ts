@@ -8,6 +8,8 @@ import { audit, AuditLogModel } from '../../models/AuditLog.js';
 import { DraftModel } from '../../models/Draft.js';
 import { MessageModel } from '../../models/Message.js';
 import { getSettings } from '../../models/Settings.js';
+import { resetTicketCounters } from '../../models/Counter.js';
+import { ShareholderModel } from '../../models/Shareholder.js';
 import { TicketModel, type TicketDoc } from '../../models/Ticket.js';
 import { applySla } from '../automation/sla.js';
 import { notifyTicketChanged } from '../realtime/changes.js';
@@ -135,4 +137,40 @@ export async function runRetention(
 
   if (moved || purged) logger.info({ moved, purged }, 'Retention schedule ran');
   return { moved, purged };
+}
+
+/**
+ * Admin "Clear all enquiry data": wipes every enquiry, email, draft, attachment copy, notification,
+ * pending approval, shareholder record and the audit log, and restarts REG numbers. Keeps users,
+ * configuration and the mailbox sync position (so old mail is not re-imported or re-acknowledged).
+ */
+export async function clearAllData(actorId: Types.ObjectId) {
+  const bucket = new mongo.GridFSBucket(mongoose.connection.db!, { bucketName: 'attachments' });
+  await bucket.drop().catch(() => undefined); // absent when attachments stay in the mailbox
+  const [tickets, messages, drafts, attachments, notifications, pendingReplies, shareholders, auditEntries] =
+    await Promise.all([
+      TicketModel.deleteMany({}),
+      MessageModel.deleteMany({}),
+      DraftModel.deleteMany({}),
+      AttachmentModel.deleteMany({}),
+      NotificationModel.deleteMany({}),
+      PendingReplyModel.deleteMany({}),
+      ShareholderModel.deleteMany({}),
+      AuditLogModel.deleteMany({}),
+    ]);
+  await resetTicketCounters();
+  const counts = {
+    tickets: tickets.deletedCount,
+    messages: messages.deletedCount,
+    drafts: drafts.deletedCount,
+    attachments: attachments.deletedCount,
+    notifications: notifications.deletedCount,
+    pendingReplies: pendingReplies.deletedCount,
+    shareholders: shareholders.deletedCount,
+    auditEntries: auditEntries.deletedCount,
+  };
+  notifyTicketChanged('all'); // any id makes open desks refresh their lists
+  await audit({ actorId, action: 'data.cleared', meta: counts });
+  logger.warn(counts, 'All enquiry data cleared by an admin');
+  return counts;
 }

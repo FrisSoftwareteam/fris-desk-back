@@ -23,3 +23,8 @@ export async function nextTicketReference(now = new Date()): Promise<string> {
   const seq = await nextSequence(`ticket-${year}`);
   return `REG-${year}-${String(seq).padStart(6, '0')}`;
 }
+
+/** Restarts every year's ticket reference sequence (used by "Clear all enquiry data"). */
+export async function resetTicketCounters(): Promise<void> {
+  await CounterModel.deleteMany({ _id: /^ticket-/ });
+}

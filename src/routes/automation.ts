@@ -28,6 +28,7 @@ import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js'
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
 import { invalidateRules } from '../services/automation/routing.js';
 import { previewOutlookMatch, startOutlookMatch } from '../services/mail/outlookMatch.js';
+import { clearAllData } from '../services/tickets/retention.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
 
 // Routing rules, SLA policies and settings (BUILD_SPEC §7). Admins manage them (screens: Phase 7);
@@ -361,6 +362,12 @@ automationRouter.get('/settings/outlook-match', ...admins, async (_req, res) => 
 automationRouter.post('/settings/outlook-match', ...admins, async (req, res) => {
   startOutlookMatch(currentUser(req));
   res.status(202).json(await previewOutlookMatch());
+});
+
+// Wipe all enquiry data (test data before go-live). Irreversible, so the body must spell it out.
+automationRouter.post('/settings/clear-data', ...admins, async (req, res) => {
+  parseBody(z.object({ confirm: z.literal('DELETE') }), req);
+  res.json(await clearAllData(currentUser(req)._id));
 });
 
 // ── Ticket history ───────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import { SlaPolicyModel } from '../models/SlaPolicy.js';
 import { TicketModel } from '../models/Ticket.js';
 import { UserModel, type User } from '../models/User.js';
 import { currentUser, requireAuth, requireRole } from '../middleware/auth.js';
-import { PENDING_ENTRA_PREFIX } from '../services/auth/index.js';
+import { PENDING_ENTRA_PREFIX, visibleUsers } from '../services/auth/index.js';
 import { invalidateUsers } from '../services/auth/userCache.js';
 import { disconnectUser } from '../services/realtime/io.js';
 
@@ -47,7 +47,7 @@ async function assertEmailFree(email: string, exceptId?: string): Promise<void> 
 }
 
 usersRouter.get('/admin/users', ...admins, async (_req, res) => {
-  const users = await UserModel.find().sort({ isActive: -1, displayName: 1 }).lean();
+  const users = await UserModel.find(visibleUsers).sort({ isActive: -1, displayName: 1 }).lean();
   res.json(users.map((u) => toDto(u as UserRow)));
 });
 

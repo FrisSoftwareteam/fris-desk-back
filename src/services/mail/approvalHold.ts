@@ -10,6 +10,7 @@ import type { TicketDoc } from '../../models/Ticket.js';
 import { UserModel, type UserDoc } from '../../models/User.js';
 import { notifyTicketChanged } from '../realtime/changes.js';
 import { notifyUsers } from '../notifications/notify.js';
+import { visibleUsers } from '../auth/index.js';
 import { approvalReason } from './approvalRules.js';
 import { htmlToText, makeSnippet } from './sanitize.js';
 
@@ -28,10 +29,10 @@ export function toApprovalPolicy(s: SettingsDoc): ApprovalPolicyDto {
 
 /** Who is told a reply is waiting: active supervisors, or the admins if there are none. */
 async function approvers(): Promise<Types.ObjectId[]> {
-  const supervisors = await UserModel.find({ role: 'supervisor', isActive: true }, { _id: 1 }).lean();
+  const supervisors = await UserModel.find({ role: 'supervisor', isActive: true, ...visibleUsers }, { _id: 1 }).lean();
   const list = supervisors.length
     ? supervisors
-    : await UserModel.find({ role: 'admin', isActive: true }, { _id: 1 }).lean();
+    : await UserModel.find({ role: 'admin', isActive: true, ...visibleUsers }, { _id: 1 }).lean();
   return list.map((u) => u._id);
 }
 

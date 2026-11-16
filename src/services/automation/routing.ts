@@ -9,6 +9,7 @@ import { applyTicketPatch } from '../tickets/update.js';
 import { TicketModel, type TicketDoc } from '../../models/Ticket.js';
 import { UserModel, type UserDoc } from '../../models/User.js';
 import { invalidateUsers } from '../auth/userCache.js';
+import { visibleUsers } from '../auth/index.js';
 import { deliverEmail } from '../mail/send.js';
 import { decideRouting, pickFromPool, type IncomingMail, type RuleLike } from './rules.js';
 import { OPEN_TICKET_STATUSES, type AssignmentMode } from '../../shared.js';
@@ -96,7 +97,7 @@ async function nextPoolOfficer(source: PoolSource, mode: AssignmentMode, cap: nu
   const pool = before?.pool ?? [];
   if (pool.length === 0) return null;
   const active = new Set(
-    (await UserModel.find({ _id: { $in: pool }, isActive: true }, { _id: 1 }).lean()).map((u) => u._id.toString()),
+    (await UserModel.find({ _id: { $in: pool }, isActive: true, ...visibleUsers }, { _id: 1 }).lean()).map((u) => u._id.toString()),
   );
   const pick = pickFromPool({
     pool,

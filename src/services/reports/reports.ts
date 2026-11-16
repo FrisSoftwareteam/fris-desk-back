@@ -21,6 +21,7 @@ import { TicketModel } from '../../models/Ticket.js';
 import { UserModel } from '../../models/User.js';
 import { businessMinutesBetween, DEFAULT_BUSINESS_HOURS, type BusinessHours } from '../automation/businessHours.js';
 import { getUserNames } from '../auth/userCache.js';
+import { visibleUsers } from '../auth/index.js';
 import { ageBand, listDays, mean, percent, slaOutcome } from './metrics.js';
 
 // Reporting (BUILD_SPEC §6.1, §7 /reports/*). Everything is computed from `tickets`, `messages` and
@@ -164,7 +165,7 @@ export async function reportAgents(f: ReportFilters): Promise<AgentReportDto> {
 
   const [users, open, assignedByDay, assignedByHour, replies, responded, resolved, received, resolvedByDay] =
     await Promise.all([
-      UserModel.find(f.agentId ? { _id: f.agentId } : { isActive: true }, { displayName: 1, role: 1 })
+      UserModel.find(f.agentId ? { _id: f.agentId } : { isActive: true, ...visibleUsers }, { displayName: 1, role: 1 })
         .sort({ displayName: 1 })
         .lean(),
       TicketModel.aggregate<{ _id: Types.ObjectId; open: number; overdue: number }>([

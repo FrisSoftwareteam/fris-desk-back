@@ -8,6 +8,13 @@ import { invalidateUsers } from './userCache.js';
 /** `entraId` placeholder for someone an admin added before their first sign-in (`pending:<email>`). */
 export const PENDING_ENTRA_PREFIX = 'pending:';
 
+/**
+ * Query filter that hides developer sign-in accounts (`dev:<email>`) in production. Dev and the
+ * deployed instance share one database, so those accounts exist there but must not be listed,
+ * assigned work or notified.
+ */
+export const visibleUsers = env.NODE_ENV === 'production' ? { entraId: { $not: /^dev:/ } } : {};
+
 export const sessionTokens = createSessionTokens(env.JWT_SECRET, env.SESSION_TTL_HOURS);
 
 export const verifyEntraAccessToken = microsoftSignInConfigured

@@ -153,7 +153,7 @@ export function htmlToText(html: string): string {
 
 /** Ticket reference in a subject line, e.g. "Re: Your enquiry [REG-2026-001042]". */
 export function findTicketReference(subject: string | null | undefined): string | null {
-  return subject?.match(/\bREG-\d{4}-\d{6}\b/)?.[0] ?? null;
+  return subject?.match(/\bREG-\d{4}-\d{6,}\b/)?.[0] ?? null;
 }
 
 /**

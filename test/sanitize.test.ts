@@ -114,8 +114,13 @@ describe('findTicketReference', () => {
   it('finds a reference anywhere in the subject', () => {
     assert.equal(findTicketReference('RE: Your enquiry [REG-2026-001042] dividend'), 'REG-2026-001042');
   });
+  it('finds references past 999,999 in a year', () => {
+    assert.equal(findTicketReference('RE: [REG-2026-1000000]'), 'REG-2026-1000000');
+    assert.equal(findTicketReference('RE: [REG-2026-200000000]'), 'REG-2026-200000000');
+  });
   it('returns null when there is none', () => {
     assert.equal(findTicketReference('Dividend REG-26-1'), null);
+    assert.equal(findTicketReference('REG-2026-12345'), null);
     assert.equal(findTicketReference(undefined), null);
   });
 });

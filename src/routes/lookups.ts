@@ -11,6 +11,7 @@ import { CategoryModel } from '../models/Category.js';
 import { FolderModel } from '../models/Folder.js';
 import { MailboxModel } from '../models/Mailbox.js';
 import { UserModel } from '../models/User.js';
+import { visibleUsers } from '../services/auth/index.js';
 import { currentUser, requireAuth, requireRole } from '../middleware/auth.js';
 import { currentSyncProblem } from '../services/mail/sync.js';
 import { StatusReasonModel } from '../models/StatusReason.js';
@@ -46,7 +47,7 @@ lookupsRouter.get('/categories', requireAuth, async (_req, res) => {
 
 // Active staff, for assignee pickers.
 lookupsRouter.get('/users', requireAuth, async (_req, res) => {
-  const users = await UserModel.find({ isActive: true }).sort({ displayName: 1 }).lean();
+  const users = await UserModel.find({ isActive: true, ...visibleUsers }).sort({ displayName: 1 }).lean();
   const body: StaffDto[] = users.map((u) => ({
     id: u._id.toString(),
     displayName: u.displayName,

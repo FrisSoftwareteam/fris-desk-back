@@ -12,6 +12,7 @@ import {
 import { HttpError, escapeRegex, parseBody } from '../lib/http.js';
 import { audit } from '../models/AuditLog.js';
 import { CategoryModel } from '../models/Category.js';
+import { DepartmentModel } from '../models/Department.js';
 import { DraftModel } from '../models/Draft.js';
 import { FolderModel } from '../models/Folder.js';
 import { MessageModel } from '../models/Message.js';
@@ -111,6 +112,21 @@ async function awaitingApprovalTicketIds(user: { _id: Types.ObjectId; role: stri
   });
 }
 
+/**
+ * Escalated view: department members (their email is the department's address or cc) see what was
+ * escalated to their departments; everyone else sees every escalated enquiry.
+ * shortcut: membership = email match, so a team mailbox has no members; add Department.memberIds
+ * when escalated parties get in-app reply/resolve.
+ */
+async function escalatedFilter(user: { email: string }): Promise<QueryFilter<Ticket>> {
+  const email = user.email.toLowerCase();
+  const ids = (await DepartmentModel.distinct('_id', {
+    isActive: true,
+    $or: [{ email }, { cc: email }],
+  })) as Types.ObjectId[];
+  return ids.length ? { status: 'escalated', escalatedToId: { $in: ids } } : { status: 'escalated' };
+}
+
 /** The ids a view lists when it's defined by other collections (Mentioned me, Awaiting approval). */
 async function viewTicketIds(view: string, user: { _id: Types.ObjectId; role: string }) {
   if (view === 'mentions') return mentionedTicketIds(user._id);
@@ -124,6 +140,8 @@ function viewFilter(
   draftTicketIds: Types.ObjectId[],
   /** For views listing a fixed set of enquiries (see viewTicketIds). */
   viewIds: Types.ObjectId[] = [],
+  /** The Escalated view's filter (see escalatedFilter). */
+  escalated: QueryFilter<Ticket> = { status: 'escalated' },
 ): QueryFilter<Ticket> {
   if (view.startsWith('folder:')) {
     const id = view.slice('folder:'.length);
@@ -142,6 +160,8 @@ function viewFilter(
       return { assigneeId: null, status: { $ne: 'resolved' } };
     case 'overdue':
       return { isOverdue: true, status: { $ne: 'resolved' } };
+    case 'escalated':
+      return escalated;
     case 'followups':
       // Every enquiry with a follow-up set, snoozed or not (G-04.3).
       return { followUp: { $ne: null } };
@@ -166,7 +186,7 @@ const SNOOZE_VISIBLE_VIEWS = new Set(['followups', 'drafts', 'mentions', 'approv
  */
 async function listFilter(
   query: ListQueryInput,
-  user: { _id: Types.ObjectId; role: string },
+  user: { _id: Types.ObjectId; role: string; email: string },
   draftTicketIds: Types.ObjectId[],
 ): Promise<{ filter: QueryFilter<Ticket>; and: QueryFilter<Ticket>[]; deletedView: boolean }> {
   // Deleted items: supervisors and admins only, every status, newest first. Search stays out of it.
@@ -181,7 +201,15 @@ async function listFilter(
     ? { deletedAt: { $ne: null } }
     : {
         deletedAt: null,
-        ...(searching ? {} : viewFilter(query.view, user._id, draftTicketIds, await viewTicketIds(query.view, user))),
+        ...(searching
+          ? {}
+          : viewFilter(
+              query.view,
+              user._id,
+              draftTicketIds,
+              await viewTicketIds(query.view, user),
+              query.view === 'escalated' ? await escalatedFilter(user) : undefined,
+            )),
       };
   const and: QueryFilter<Ticket>[] = searching
     ? [await searchFilter(query.q!)]
@@ -245,7 +273,7 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
   // Matches the lists: snoozed enquiries aren't counted until they're due.
   const unread = { ...base, isUnread: true, ...snoozedHiddenFilter(now) };
 
-  const [inbox, mine, unassigned, overdue, followups, byFolder, drafts, deleted, mentions, approvals] =
+  const [inbox, mine, unassigned, overdue, followups, byFolder, drafts, deleted, mentions, approvals, escalated] =
     await Promise.all([
       TicketModel.countDocuments(unread),
       TicketModel.countDocuments({ ...unread, assigneeId: user._id }),
@@ -263,13 +291,22 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
         TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null }),
       ),
       awaitingApprovalTicketIds(user).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
+      escalatedFilter(user).then((f) => TicketModel.countDocuments({ ...unread, ...f })),
     ]);
 
   const body: TicketCountsDto = {
-    views: { inbox, mine, mentions, approvals, unassigned, overdue, followups, drafts, deleted } satisfies Record<
-      (typeof SYSTEM_VIEWS)[number],
-      number
-    >,
+    views: {
+      inbox,
+      mine,
+      mentions,
+      approvals,
+      unassigned,
+      overdue,
+      escalated,
+      followups,
+      drafts,
+      deleted,
+    } satisfies Record<(typeof SYSTEM_VIEWS)[number], number>,
     folders: Object.fromEntries(byFolder.map((f) => [f._id.toString(), f.n])),
   };
   res.json(body);

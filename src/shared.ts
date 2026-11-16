@@ -252,6 +252,7 @@ export const SYSTEM_VIEWS = [
   'approvals',
   'unassigned',
   'overdue',
+  'escalated',
   'followups',
   'drafts',
   'deleted',
@@ -759,6 +760,8 @@ export interface OutlookMatchResultDto {
 }
 
 export interface OutlookMatchDto {
+  /** Unread in the Outlook Inbox right now (already imported + toImport). */
+  unreadInOutlook: number;
   toResolve: number;
   toReopen: number;
   toImport: number;

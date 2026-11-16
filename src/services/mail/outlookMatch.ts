@@ -50,7 +50,7 @@ async function buildPlan(graph: GraphService) {
   // Oldest first, so a thread's first message creates the enquiry and later ones join it.
   const received = new Map(unread.map((m) => [m.id!, m.receivedDateTime ?? '']));
   plan.importIds.sort((a, b) => received.get(a)!.localeCompare(received.get(b)!));
-  return plan;
+  return { ...plan, unread: unread.length };
 }
 
 function requireGraph(): GraphService {
@@ -60,11 +60,14 @@ function requireGraph(): GraphService {
 }
 
 export async function previewOutlookMatch(): Promise<OutlookMatchDto> {
-  const plan: MatchPlan = running ? { resolveIds: [], reopenIds: [], importIds: [] } : await buildPlan(requireGraph());
+  const plan: MatchPlan & { unread: number } = running
+    ? { resolveIds: [], reopenIds: [], importIds: [], unread: 0 }
+    : await buildPlan(requireGraph());
   return {
     toResolve: plan.resolveIds.length,
     toReopen: plan.reopenIds.length,
     toImport: plan.importIds.length,
+    unreadInOutlook: plan.unread,
     running,
     lastResult,
   };

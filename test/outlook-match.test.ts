@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { planOutlookMatch, type MatchTicket } from '../src/services/mail/outlookMatchRules.ts';
+import { pickSentToImport, planOutlookMatch, type MatchTicket } from '../src/services/mail/outlookMatchRules.ts';
 
 const t = (id: string, extra: Partial<MatchTicket> = {}): MatchTicket => ({
   id,
@@ -60,5 +60,27 @@ describe('match Outlook unread mail', () => {
       tickets: [],
     });
     assert.deepEqual(plan.importIds, ['old']);
+  });
+});
+
+describe('import replies sent from Outlook', () => {
+  const known = { graphIds: new Set(['g-imported']), internetIds: new Set(['<app-sent@x>']) };
+  it('takes replies to the contact, skips ones already in the app, internal mail and drafts', () => {
+    const ids = pickSentToImport(
+      [
+        { id: 'reply', to: ['Holder@Example.com'] },
+        { id: 'cc-reply', to: ['other@x.com', 'holder@example.com'] },
+        { id: 'g-imported', to: ['holder@example.com'] },
+        { id: 'app-copy', internetMessageId: '<app-sent@x>', to: ['holder@example.com'] },
+        { id: 'internal-fwd', to: ['colleague@registrar.com'] },
+        { id: 'draft', isDraft: true, to: ['holder@example.com'] },
+      ],
+      ' holder@example.com',
+      known,
+    );
+    assert.deepEqual(ids, ['reply', 'cc-reply']);
+  });
+  it('imports nothing when the enquiry has no contact email', () => {
+    assert.deepEqual(pickSentToImport([{ id: 'a', to: [''] }], '', known), []);
   });
 });

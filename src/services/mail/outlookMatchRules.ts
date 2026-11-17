@@ -52,3 +52,33 @@ export function planOutlookMatch(input: {
   plan.importIds = unread.filter((m) => !input.knownMessageTicket.has(m.id)).map((m) => m.id);
   return plan;
 }
+
+export interface SentMail {
+  id: string;
+  internetMessageId?: string | null;
+  to: string[];
+  isDraft?: boolean | null;
+}
+
+/**
+ * "Import replies sent from Outlook": which Sent Items of a conversation to copy into its enquiry.
+ * Only mail to the enquiry's contact (skips internal forwards and alerts), and nothing the app
+ * already holds — app-sent replies are stored by Internet Message-ID, imports by Graph id.
+ */
+export function pickSentToImport(
+  sent: SentMail[],
+  contactEmail: string,
+  known: { graphIds: Set<string>; internetIds: Set<string> },
+): string[] {
+  const contact = contactEmail.trim().toLowerCase();
+  return sent
+    .filter(
+      (m) =>
+        !m.isDraft &&
+        contact !== '' &&
+        m.to.some((e) => e.trim().toLowerCase() === contact) &&
+        !known.graphIds.has(m.id) &&
+        !(m.internetMessageId && known.internetIds.has(m.internetMessageId)),
+    )
+    .map((m) => m.id);
+}

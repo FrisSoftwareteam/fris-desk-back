@@ -1,4 +1,4 @@
-import type { OutlookMatchDto, OutlookMatchResultDto } from '../../shared.js';
+import type { JobProgressDto, OutlookMatchDto, OutlookMatchResultDto } from '../../shared.js';
 import { HttpError } from '../../lib/http.js';
 import { logger } from '../../lib/logger.js';
 import { audit } from '../../models/AuditLog.js';
@@ -16,6 +16,7 @@ import { planOutlookMatch, type MatchPlan } from './outlookMatchRules.js';
 
 let running = false;
 let lastResult: OutlookMatchResultDto | null = null;
+let progress: JobProgressDto | null = null;
 
 async function buildPlan(graph: GraphService) {
   const unread = (await graph.listUnreadInbox()).filter((m) => m.id && !m.isDraft);
@@ -69,6 +70,7 @@ export async function previewOutlookMatch(): Promise<OutlookMatchDto> {
     toImport: plan.importIds.length,
     unreadInOutlook: plan.unread,
     running,
+    progress: running ? progress : null,
     lastResult,
   };
 }
@@ -79,6 +81,7 @@ export function startOutlookMatch(user: UserDoc): void {
   running = true;
   void run(graph, user).finally(() => {
     running = false;
+    progress = null;
   });
 }
 
@@ -92,7 +95,11 @@ async function run(graph: GraphService, user: UserDoc) {
     error: null,
   };
   try {
-    for (const id of (await buildPlan(graph)).importIds) {
+    progress = { step: 'Reading the Outlook Inbox', done: 0, total: 0 };
+    const importIds = (await buildPlan(graph)).importIds;
+    progress = { step: 'Importing unread mail', done: 0, total: importIds.length };
+    for (const id of importIds) {
+      progress.done += 1;
       try {
         const r = await ingestMessage(graph, id, { quiet: true });
         if (r === 'created' || r === 'threaded') result.imported += 1;
@@ -102,9 +109,12 @@ async function run(graph: GraphService, user: UserDoc) {
       }
     }
     // Planned again: imports may have reopened enquiries already.
+    progress = { step: 'Reading the Outlook Inbox', done: 0, total: 0 };
     const plan = await buildPlan(graph);
+    progress = { step: 'Updating enquiries', done: 0, total: plan.resolveIds.length + plan.reopenIds.length };
     const change = async (ids: string[], patchFor: (t: TicketDoc) => TicketPatch, key: 'resolved' | 'reopened') => {
       for (const id of ids) {
+        progress!.done += 1;
         const ticket = await TicketModel.findById(id);
         if (!ticket) continue;
         try {

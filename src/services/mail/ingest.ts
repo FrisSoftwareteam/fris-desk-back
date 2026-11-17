@@ -22,7 +22,7 @@ const FILE_ATTACHMENT = '#microsoft.graph.fileAttachment';
 
 export type IngestResult = 'created' | 'threaded' | 'duplicate' | 'skipped';
 
-function toAddress(r: Recipient | null | undefined): EmailAddress {
+export function toAddress(r: Recipient | null | undefined): EmailAddress {
   return { name: r?.emailAddress?.name?.trim() ?? '', email: r?.emailAddress?.address?.trim().toLowerCase() ?? '' };
 }
 
@@ -238,7 +238,7 @@ function rewriteInlineImages(html: string, attachments: AttachmentMeta[]): strin
   });
 }
 
-function textToHtml(text: string): string {
+export function textToHtml(text: string): string {
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return escaped
     .split(/\n{2,}/)

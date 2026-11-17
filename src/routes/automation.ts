@@ -28,6 +28,7 @@ import { DEFAULT_BUSINESS_HOURS } from '../services/automation/businessHours.js'
 import { getStatusReasons } from '../services/tickets/statusReasons.js';
 import { assignBacklog, invalidateRules, UNASSIGNED_OPEN } from '../services/automation/routing.js';
 import { previewOutlookMatch, startOutlookMatch } from '../services/mail/outlookMatch.js';
+import { sentBackfillStatus, startSentBackfill } from '../services/mail/sentBackfill.js';
 import { clearAllData } from '../services/tickets/retention.js';
 import { invalidateSlaPolicies, recalculateSlaInBackground } from '../services/automation/sla.js';
 
@@ -362,6 +363,16 @@ automationRouter.get('/settings/outlook-match', ...admins, async (_req, res) => 
 automationRouter.post('/settings/outlook-match', ...admins, async (req, res) => {
   startOutlookMatch(currentUser(req));
   res.status(202).json(await previewOutlookMatch());
+});
+
+// Copy replies already sent from Outlook (Sent Items) into their enquiries' threads. Sends nothing.
+automationRouter.get('/settings/outlook-sent', ...admins, (_req, res) => {
+  res.json(sentBackfillStatus());
+});
+
+automationRouter.post('/settings/outlook-sent', ...admins, (req, res) => {
+  startSentBackfill(currentUser(req));
+  res.status(202).json(sentBackfillStatus());
 });
 
 // Share out open enquiries nobody owns with the current assignment settings (e.g. at go-live).

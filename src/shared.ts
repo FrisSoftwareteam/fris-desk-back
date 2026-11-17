@@ -759,6 +759,29 @@ export interface OutlookMatchResultDto {
   error: string | null;
 }
 
+/** Where a running background job has got to, e.g. "Importing unread mail", 12 of 40. */
+export interface JobProgressDto {
+  step: string;
+  done: number;
+  total: number;
+}
+
+export interface SentBackfillResultDto {
+  finishedAt: string;
+  /** Sent replies copied into enquiry threads. */
+  imported: number;
+  /** Enquiries that gained at least one reply. */
+  enquiries: number;
+  failed: number;
+  error: string | null;
+}
+
+export interface SentBackfillDto {
+  running: boolean;
+  progress: JobProgressDto | null;
+  lastResult: SentBackfillResultDto | null;
+}
+
 export interface OutlookMatchDto {
   /** Unread in the Outlook Inbox right now (already imported + toImport). */
   unreadInOutlook: number;
@@ -766,6 +789,7 @@ export interface OutlookMatchDto {
   toReopen: number;
   toImport: number;
   running: boolean;
+  progress: JobProgressDto | null;
   lastResult: OutlookMatchResultDto | null;
 }
 

@@ -131,6 +131,23 @@ export class GraphService {
     }
   }
 
+  /** Sent Items in one Outlook conversation, bodies included. Read-only. */
+  async listSentInConversation(conversationId: string): Promise<Message[]> {
+    const all: Message[] = [];
+    let request = this.client
+      .api(`${this.base}/mailFolders/sentitems/messages`)
+      .header('Prefer', 'outlook.body-content-type="html"')
+      .filter(`conversationId eq '${conversationId.replace(/'/g, "''")}'`)
+      .select(`${MESSAGE_FIELDS},sentDateTime`)
+      .top(50);
+    for (;;) {
+      const res = (await request.get()) as { value: Message[]; '@odata.nextLink'?: string };
+      all.push(...res.value);
+      if (!res['@odata.nextLink']) return all;
+      request = this.client.api(res['@odata.nextLink']).header('Prefer', 'outlook.body-content-type="html"');
+    }
+  }
+
   getMessage(id: string): Promise<Message> {
     return this.client
       .api(`${this.base}/messages/${encodeURIComponent(id)}`)

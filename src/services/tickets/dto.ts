@@ -61,6 +61,7 @@ export function toTicketSummary(
     deletedAt: t.deletedAt ? t.deletedAt.toISOString() : null,
     deletedBy: person(t.deletedById, names),
     purgeAt: purgeDate(t.deletedAt, purgeAfterDays)?.toISOString() ?? null,
+    notEnquiry: t.notEnquiry ? { reason: t.notEnquiry.reason, note: t.notEnquiry.note ?? '' } : null,
     followUp: t.followUp
       ? {
           at: t.followUp.at.toISOString(),

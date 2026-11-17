@@ -35,6 +35,22 @@ export const PRIORITY_LABELS: Record<TicketPriority, string> = {
   urgent: 'Urgent',
 };
 
+/** Why an officer marked an email "Not an enquiry" (adverts, mail we were only copied on). */
+export const NOT_ENQUIRY_REASONS = ['advert', 'cc_info', 'other'] as const;
+export type NotEnquiryReason = (typeof NOT_ENQUIRY_REASONS)[number];
+
+export const NOT_ENQUIRY_LABELS: Record<NotEnquiryReason, string> = {
+  advert: 'Advertisement / spam',
+  cc_info: 'Copied for information',
+  other: 'Other',
+};
+
+/** POST /tickets/:id/not-enquiry (and /tickets/bulk/not-enquiry with `ids`). Note is required for "other". */
+export interface NotEnquiryDto {
+  reason: NotEnquiryReason;
+  note?: string;
+}
+
 export const TICKET_ORIGINS = ['email', 'phone', 'walk_in', 'manual'] as const;
 export type TicketOrigin = (typeof TICKET_ORIGINS)[number];
 
@@ -151,6 +167,8 @@ export interface TicketSummaryDto {
   deletedBy: Pick<UserDto, 'id' | 'displayName'> | null;
   /** When the scheduled purge will remove it for good; null if purging is off. */
   purgeAt: string | null;
+  /** Set when an officer marked it "Not an enquiry" (it then sits in that view, not Deleted items). */
+  notEnquiry: { reason: NotEnquiryReason; note: string } | null;
   /** A call-back or reminder an officer set (G-04.3); null when there is none. */
   followUp: FollowUpDto | null;
 }
@@ -256,6 +274,7 @@ export const SYSTEM_VIEWS = [
   'followups',
   'drafts',
   'deleted',
+  'not_enquiries',
 ] as const;
 export type SystemView = (typeof SYSTEM_VIEWS)[number];
 
@@ -269,7 +288,7 @@ export interface TicketListResponse {
 export interface TicketCountsDto {
   /**
    * Unread count per system view (Overdue, Drafts and Deleted are totals; Follow-ups counts those
-   * now due). Deleted is 0 for agents.
+   * now due). Deleted and Not enquiries are 0 for agents.
    */
   views: Record<SystemView, number>;
   /** Unread count per folder id. */

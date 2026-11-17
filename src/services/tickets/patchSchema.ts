@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { z } from 'zod';
-import { TICKET_PRIORITIES, TICKET_STATUSES } from '../../shared.js';
+import { NOT_ENQUIRY_REASONS, TICKET_PRIORITIES, TICKET_STATUSES } from '../../shared.js';
 
 // Request shapes for changing enquiries, one at a time (PATCH /tickets/:id) or several at once
 // (POST /tickets/bulk, GAP_ANALYSIS G-04.2). Kept free of models so tests can import them.
@@ -44,6 +44,19 @@ export const BulkBody = z
   .strict();
 
 export const BulkIdsBody = z.object({ ids: z.array(objectId).min(1).max(MAX_BULK) }).strict();
+
+const notEnquiryFields = {
+  reason: z.enum(NOT_ENQUIRY_REASONS),
+  note: z.string().trim().max(500).default(''),
+};
+const noteForOther = (b: { reason: string; note: string }) => b.reason !== 'other' || b.note.length > 0;
+const noteMessage = { message: 'Say why it is not an enquiry', path: ['note'] };
+
+export const NotEnquiryBody = z.object(notEnquiryFields).strict().refine(noteForOther, noteMessage);
+export const BulkNotEnquiryBody = z
+  .object({ ids: BulkIdsBody.shape.ids, ...notEnquiryFields })
+  .strict()
+  .refine(noteForOther, noteMessage);
 
 export type TicketPatch = z.infer<typeof PatchBody>;
 export type BulkPatch = z.infer<typeof BulkBody>['patch'];

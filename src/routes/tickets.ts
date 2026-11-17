@@ -21,7 +21,14 @@ import { PendingReplyModel } from '../models/PendingReply.js';
 import { TicketModel, type Ticket, type TicketDoc } from '../models/Ticket.js';
 import { currentUser, requireAuth, requireRole } from '../middleware/auth.js';
 import { namesForTickets, toTicketDetail, toTicketSummary } from '../services/tickets/dto.js';
-import { BulkBody, BulkIdsBody, PatchBody, nextCategoryIds } from '../services/tickets/patchSchema.js';
+import {
+  BulkBody,
+  BulkIdsBody,
+  BulkNotEnquiryBody,
+  NotEnquiryBody,
+  PatchBody,
+  nextCategoryIds,
+} from '../services/tickets/patchSchema.js';
 import { applyTicketPatch, checkPatch } from '../services/tickets/update.js';
 import { snoozedHiddenFilter } from '../services/tickets/followUpRules.js';
 import { makeSnippet } from '../services/mail/sanitize.js';
@@ -30,7 +37,7 @@ import { autoAcknowledge } from '../services/automation/autoAck.js';
 import { nextTicketReference } from '../models/Counter.js';
 import { currentViewers } from '../services/realtime/io.js';
 import { getSettings } from '../models/Settings.js';
-import { purgeTicket, restoreTicket, softDeleteTicket } from '../services/tickets/retention.js';
+import { markNotEnquiry, purgeTicket, restoreTicket, softDeleteTicket } from '../services/tickets/retention.js';
 import { enquiryCsv, sendCsv } from '../services/reports/exports.js';
 import { EXPORT_ROW_LIMIT } from '../services/reports/reports.js';
 
@@ -169,7 +176,8 @@ function viewFilter(
       // Enquiries where the signed-in officer has an unsent reply, forward or note.
       return { _id: { $in: draftTicketIds } };
     case 'deleted':
-      // Handled by the list route itself (it's the one view that shows deleted enquiries).
+    case 'not_enquiries':
+      // Handled by the list route itself (the views that show deleted enquiries).
       return {};
     default:
       throw new HttpError(400, 'Unknown view');
@@ -189,8 +197,9 @@ async function listFilter(
   user: { _id: Types.ObjectId; role: string; email: string },
   draftTicketIds: Types.ObjectId[],
 ): Promise<{ filter: QueryFilter<Ticket>; and: QueryFilter<Ticket>[]; deletedView: boolean }> {
-  // Deleted items: supervisors and admins only, every status, newest first. Search stays out of it.
-  const deletedView = query.view === 'deleted' && !query.q;
+  // Deleted items and Not enquiries: supervisors and admins only, every status, newest first.
+  // Search stays out of them.
+  const deletedView = (query.view === 'deleted' || query.view === 'not_enquiries') && !query.q;
   if (deletedView && !canManageDeleted(user.role)) {
     throw new HttpError(403, 'Only supervisors and admins can see deleted enquiries');
   }
@@ -198,7 +207,7 @@ async function listFilter(
   // Searching looks across every enquiry (all views, folders, open and resolved), as Outlook does.
   const searching = Boolean(query.q);
   const filter: QueryFilter<Ticket> = deletedView
-    ? { deletedAt: { $ne: null } }
+    ? { deletedAt: { $ne: null }, notEnquiry: query.view === 'not_enquiries' ? { $ne: null } : null }
     : {
         deletedAt: null,
         ...(searching
@@ -273,26 +282,41 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
   // Matches the lists: snoozed enquiries aren't counted until they're due.
   const unread = { ...base, isUnread: true, ...snoozedHiddenFilter(now) };
 
-  const [inbox, mine, unassigned, overdue, followups, byFolder, drafts, deleted, mentions, approvals, escalated] =
-    await Promise.all([
-      TicketModel.countDocuments(unread),
-      TicketModel.countDocuments({ ...unread, assigneeId: user._id }),
-      TicketModel.countDocuments({ ...unread, assigneeId: null }),
-      TicketModel.countDocuments({ ...base, isOverdue: true, ...snoozedHiddenFilter(now) }),
-      TicketModel.countDocuments({ ...base, 'followUp.at': { $lte: now } }),
-      TicketModel.aggregate<{ _id: Types.ObjectId; n: number }>([
-        { $match: { ...unread, folderId: { $ne: null } } },
-        { $group: { _id: '$folderId', n: { $sum: 1 } } },
-      ]),
-      myDraftTicketIds(user._id).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
-      canManageDeleted(user.role) ? TicketModel.countDocuments({ deletedAt: { $ne: null } }) : 0,
-      // Enquiries with a mention of me I haven't seen yet.
-      NotificationModel.distinct('ticketId', { userId: user._id, type: 'mention', readAt: null }).then((ids) =>
-        TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null }),
-      ),
-      awaitingApprovalTicketIds(user).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
-      escalatedFilter(user).then((f) => TicketModel.countDocuments({ ...unread, ...f })),
-    ]);
+  const [
+    inbox,
+    mine,
+    unassigned,
+    overdue,
+    followups,
+    byFolder,
+    drafts,
+    deleted,
+    notEnquiries,
+    mentions,
+    approvals,
+    escalated,
+  ] = await Promise.all([
+    TicketModel.countDocuments(unread),
+    TicketModel.countDocuments({ ...unread, assigneeId: user._id }),
+    TicketModel.countDocuments({ ...unread, assigneeId: null }),
+    TicketModel.countDocuments({ ...base, isOverdue: true, ...snoozedHiddenFilter(now) }),
+    TicketModel.countDocuments({ ...base, 'followUp.at': { $lte: now } }),
+    TicketModel.aggregate<{ _id: Types.ObjectId; n: number }>([
+      { $match: { ...unread, folderId: { $ne: null } } },
+      { $group: { _id: '$folderId', n: { $sum: 1 } } },
+    ]),
+    myDraftTicketIds(user._id).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
+    canManageDeleted(user.role) ? TicketModel.countDocuments({ deletedAt: { $ne: null }, notEnquiry: null }) : 0,
+    canManageDeleted(user.role)
+      ? TicketModel.countDocuments({ deletedAt: { $ne: null }, notEnquiry: { $ne: null } })
+      : 0,
+    // Enquiries with a mention of me I haven't seen yet.
+    NotificationModel.distinct('ticketId', { userId: user._id, type: 'mention', readAt: null }).then((ids) =>
+      TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null }),
+    ),
+    awaitingApprovalTicketIds(user).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
+    escalatedFilter(user).then((f) => TicketModel.countDocuments({ ...unread, ...f })),
+  ]);
 
   const body: TicketCountsDto = {
     views: {
@@ -306,6 +330,7 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
       followups,
       drafts,
       deleted,
+      not_enquiries: notEnquiries,
     } satisfies Record<(typeof SYSTEM_VIEWS)[number], number>,
     folders: Object.fromEntries(byFolder.map((f) => [f._id.toString(), f.n])),
   };
@@ -506,6 +531,23 @@ ticketsRouter.post('/tickets/bulk/restore', requireRole('supervisor', 'admin'), 
   const user = currentUser(req);
   const tickets = await TicketModel.find({ _id: { $in: ids }, deletedAt: { $ne: null } });
   res.json(await forEachTicket(ids, tickets, (t) => restoreTicket(t, user._id, 'restored by an officer')));
+});
+
+// POST /tickets/:id/not-enquiry and /tickets/bulk/not-enquiry — any officer can set aside an
+// advert or a copied-in email; supervisors and admins review it in Not enquiries (and can restore).
+ticketsRouter.post('/tickets/bulk/not-enquiry', async (req, res) => {
+  const { ids, ...notEnquiry } = parseBody(BulkNotEnquiryBody, req);
+  const user = currentUser(req);
+  const tickets = await TicketModel.find({ _id: { $in: ids }, deletedAt: null });
+  res.json(await forEachTicket(ids, tickets, (t) => markNotEnquiry(t, user._id, notEnquiry)));
+});
+
+ticketsRouter.post('/tickets/:id/not-enquiry', async (req, res) => {
+  const notEnquiry = parseBody(NotEnquiryBody, req);
+  const ticket = await TicketModel.findOne({ _id: objectId.parse(req.params.id), deletedAt: null });
+  if (!ticket) throw new HttpError(404, 'Enquiry not found');
+  await markNotEnquiry(ticket, currentUser(req)._id, notEnquiry);
+  res.status(204).end();
 });
 
 // DELETE /tickets/:id — move to Deleted items (restorable until the retention purge).

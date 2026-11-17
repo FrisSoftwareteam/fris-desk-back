@@ -12,6 +12,8 @@ import { resetTicketCounters } from '../../models/Counter.js';
 import { ShareholderModel } from '../../models/Shareholder.js';
 import { TicketModel, type TicketDoc } from '../../models/Ticket.js';
 import { applySla } from '../automation/sla.js';
+import { markMailRead } from '../automation/autoAck.js';
+import type { NotEnquiryReason } from '../../shared.js';
 import { notifyTicketChanged } from '../realtime/changes.js';
 import { DAY } from './retentionRules.js';
 
@@ -31,10 +33,28 @@ export async function softDeleteTicket(ticket: TicketDoc, actorId: Types.ObjectI
   await audit({ actorId, action: 'ticket.deleted', ticketId: ticket._id, meta: { reason } });
 }
 
+/**
+ * "Not an enquiry" (an advert, mail we were only copied on): out of every officer's view, into
+ * Not enquiries for supervisors and admins to review. Sends nothing; new mail on it restores it.
+ */
+export async function markNotEnquiry(
+  ticket: TicketDoc,
+  actorId: Types.ObjectId,
+  notEnquiry: { reason: NotEnquiryReason; note: string },
+) {
+  if (ticket.deletedAt) return;
+  ticket.notEnquiry = notEnquiry;
+  await softDeleteTicket(ticket, actorId, `not an enquiry: ${notEnquiry.reason}`);
+  markMailRead(ticket).catch((err: unknown) =>
+    logger.error({ err, ticket: ticket.reference }, 'Mark mail read failed'),
+  );
+}
+
 export async function restoreTicket(ticket: TicketDoc, actorId: Types.ObjectId | null, reason: string) {
   if (!ticket.deletedAt) return;
   ticket.deletedAt = null;
   ticket.deletedById = null;
+  ticket.notEnquiry = null;
   // Picks up any SLA policy changes made while it was deleted.
   await applySla(ticket);
   await ticket.save();

@@ -1,5 +1,5 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
-import { TICKET_ORIGINS, TICKET_PRIORITIES, TICKET_STATUSES } from '../shared.js';
+import { NOT_ENQUIRY_REASONS, TICKET_ORIGINS, TICKET_PRIORITIES, TICKET_STATUSES } from '../shared.js';
 import { notifyTicketChanged } from '../services/realtime/changes.js';
 import { shouldClearStatusReason } from '../services/tickets/followUpRules.js';
 
@@ -62,6 +62,14 @@ const ticketSchema = new Schema(
     // purge (services/tickets/retention.ts). deletedById is null when the retention schedule did it.
     deletedAt: { type: Date, default: null },
     deletedById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    // Set with deletedAt when an officer marks the email "Not an enquiry" (its own view; who = deletedById).
+    notEnquiry: {
+      type: new Schema(
+        { reason: { type: String, enum: NOT_ENQUIRY_REASONS, required: true }, note: { type: String, default: '' } },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   { timestamps: true },
 );

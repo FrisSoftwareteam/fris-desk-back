@@ -6,7 +6,14 @@ import {
   shouldClearStatusReason,
   snoozedHiddenFilter,
 } from '../src/services/tickets/followUpRules.ts';
-import { BulkBody, MAX_BULK, PatchBody, nextCategoryIds } from '../src/services/tickets/patchSchema.ts';
+import {
+  BulkBody,
+  BulkNotEnquiryBody,
+  MAX_BULK,
+  NotEnquiryBody,
+  PatchBody,
+  nextCategoryIds,
+} from '../src/services/tickets/patchSchema.ts';
 
 const id = (n: number) => n.toString(16).padStart(24, '0');
 const now = new Date('2026-10-20T10:00:00Z');
@@ -72,5 +79,22 @@ describe('stages (G-04.7)', () => {
     assert.equal(shouldClearStatusReason(true, false), true);
     assert.equal(shouldClearStatusReason(true, true), false);
     assert.equal(shouldClearStatusReason(false, false), false);
+  });
+});
+
+describe('not an enquiry', () => {
+  it('needs a note only for "other"', () => {
+    assert.deepEqual(NotEnquiryBody.parse({ reason: 'advert' }), { reason: 'advert', note: '' });
+    assert.throws(() => NotEnquiryBody.parse({ reason: 'other', note: '  ' }));
+    assert.equal(NotEnquiryBody.parse({ reason: 'other', note: ' newsletter ' }).note, 'newsletter');
+  });
+  it('refuses unknown reasons and empty bulk ids', () => {
+    assert.throws(() => NotEnquiryBody.parse({ reason: 'spam' }));
+    assert.throws(() => BulkNotEnquiryBody.parse({ ids: [], reason: 'cc_info' }));
+    assert.deepEqual(BulkNotEnquiryBody.parse({ ids: [id(1)], reason: 'cc_info' }), {
+      ids: [id(1)],
+      reason: 'cc_info',
+      note: '',
+    });
   });
 });

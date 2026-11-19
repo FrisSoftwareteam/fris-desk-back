@@ -28,3 +28,21 @@ export function isSnoozed(followUp: { at: Date; hide: boolean } | null | undefin
 export function shouldClearStatusReason(statusChanged: boolean, reasonChanged: boolean): boolean {
   return statusChanged && !reasonChanged;
 }
+
+/** When an auto-resolve set now for `days` falls due (calendar days, not working time). */
+export function autoResolveAt(now: Date, days: number): Date {
+  return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+/** Enquiries still waiting on the shareholder whose auto-resolve time has passed (the cron job). */
+export function autoResolvesDueFilter(now: Date) {
+  return { deletedAt: null, status: 'awaiting_shareholder' as const, 'autoResolve.at': { $lte: now } };
+}
+
+/**
+ * Auto-resolve only makes sense while we wait for the shareholder: any other status (their reply
+ * reopening it, an officer resolving or picking it back up) cancels it.
+ */
+export function shouldClearAutoResolve(statusChanged: boolean, status: string): boolean {
+  return statusChanged && status !== 'awaiting_shareholder';
+}

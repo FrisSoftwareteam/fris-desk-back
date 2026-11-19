@@ -37,21 +37,38 @@ export async function autoAcknowledge(
   const automated = automatedReason(ticket.contact.email, opts.headers);
   if (automated) return skip(automated);
 
-  await sendTemplateEmail(ticket, settings.autoAcknowledge.templateId, opts.graphMessageId, 'message.auto_acknowledged', skip);
+  await sendTemplateEmail(
+    ticket,
+    settings.autoAcknowledge.templateId,
+    opts.graphMessageId,
+    'message.auto_acknowledged',
+    skip,
+  );
 }
 
 /**
  * Resolution email: when enabled in settings, tells the shareholder their enquiry is resolved
  * (asking them to confirm they're satisfied) as a reply in the same conversation. A reply back
- * reopens the enquiry through ingest. Doesn't change the ticket's status.
+ * reopens the enquiry through ingest. Doesn't change the ticket's status. `which` picks the
+ * officer-resolved email or the one for enquiries that resolved themselves for lack of a reply.
  */
-export async function sendResolutionEmail(ticket: TicketDoc): Promise<void> {
+export async function sendResolutionEmail(
+  ticket: TicketDoc,
+  which: 'resolutionEmail' | 'autoResolveEmail' = 'resolutionEmail',
+): Promise<void> {
   const settings = await getSettings();
-  if (!settings.resolutionEmail?.enabled || !settings.resolutionEmail.templateId) return;
+  const config = settings[which];
+  if (!config?.enabled || !config.templateId) return;
+  const isAuto = which === 'autoResolveEmail';
 
   const skip = async (reason: string) => {
-    logger.info({ ticket: ticket.reference, reason }, 'Resolution email skipped');
-    await audit({ actorId: null, action: 'resolution_email.skipped', ticketId: ticket._id, meta: { reason } });
+    logger.info({ ticket: ticket.reference, reason, which }, 'Resolution email skipped');
+    await audit({
+      actorId: null,
+      action: isAuto ? 'auto_resolve_email.skipped' : 'resolution_email.skipped',
+      ticketId: ticket._id,
+      meta: { reason },
+    });
   };
   if (!ticket.contact.email) return skip('no email address');
   const automated = automatedReason(ticket.contact.email);
@@ -65,9 +82,9 @@ export async function sendResolutionEmail(ticket: TicketDoc): Promise<void> {
     .lean();
   await sendTemplateEmail(
     ticket,
-    settings.resolutionEmail.templateId,
+    config.templateId,
     lastInbound?.graphMessageId ?? null,
-    'message.resolution_emailed',
+    isAuto ? 'message.auto_resolve_emailed' : 'message.resolution_emailed',
     skip,
   );
 }

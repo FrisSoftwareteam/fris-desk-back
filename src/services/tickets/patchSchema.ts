@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { z } from 'zod';
-import { NOT_ENQUIRY_REASONS, TICKET_PRIORITIES, TICKET_STATUSES } from '../../shared.js';
+import { AUTO_RESOLVE_DAYS, NOT_ENQUIRY_REASONS, TICKET_PRIORITIES, TICKET_STATUSES } from '../../shared.js';
 
 // Request shapes for changing enquiries, one at a time (PATCH /tickets/:id) or several at once
 // (POST /tickets/bulk, GAP_ANALYSIS G-04.2). Kept free of models so tests can import them.
@@ -25,6 +25,10 @@ const fields = {
   folderId: objectId.nullable(),
   priority: z.enum(TICKET_PRIORITIES),
   followUp: FollowUpBody.nullable(),
+  autoResolveDays: z
+    .number()
+    .refine((n) => (AUTO_RESOLVE_DAYS as readonly number[]).includes(n), 'Choose one of the offered periods')
+    .nullable(),
 };
 
 export const PatchBody = z

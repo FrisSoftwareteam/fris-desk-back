@@ -7,6 +7,7 @@ import { cleanupAbandonedUploads } from './cleanupAttachments.js';
 import { checkOverdue } from '../services/automation/sla.js';
 import { runRetention } from '../services/tickets/retention.js';
 import { checkFollowUps } from '../services/tickets/followUps.js';
+import { checkAutoResolves } from '../services/tickets/autoResolve.js';
 
 const tasks: ScheduledTask[] = [];
 
@@ -22,6 +23,8 @@ export function startJobs(): void {
   tasks.push(cron.schedule('0 */5 * * * *', () => checkOverdue(), { name: 'sla-overdue', noOverlap: true }));
   // Follow-ups: bring enquiries back when their call-back time comes, every minute.
   tasks.push(cron.schedule('0 * * * * *', () => checkFollowUps(), { name: 'follow-ups', noOverlap: true }));
+  // Auto-resolve: close enquiries whose shareholder didn't reply in time, every minute.
+  tasks.push(cron.schedule('30 * * * * *', () => checkAutoResolves(), { name: 'auto-resolve', noOverlap: true }));
   // Housekeeping that doesn't need Graph: daily at 02:30 server time.
   tasks.push(
     cron.schedule('0 30 2 * * *', () => cleanupAbandonedUploads(), { name: 'cleanup-uploads', noOverlap: true }),

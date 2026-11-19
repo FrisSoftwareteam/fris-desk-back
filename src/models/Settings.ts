@@ -15,6 +15,11 @@ const settingsSchema = new Schema(
       enabled: { type: Boolean, required: true, default: false },
       templateId: { type: Schema.Types.ObjectId, ref: 'Template', default: null },
     },
+    // Email sent to the shareholder when an enquiry resolves itself because they didn't reply.
+    autoResolveEmail: {
+      enabled: { type: Boolean, required: true, default: false },
+      templateId: { type: Schema.Types.ObjectId, ref: 'Template', default: null },
+    },
     // Mark an enquiry's inbound emails read in the shared mailbox when it's resolved.
     markReadOnResolve: { type: Boolean, default: false },
     // Master switch for round-robin assignment by routing rules.

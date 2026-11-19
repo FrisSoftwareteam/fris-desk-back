@@ -259,6 +259,10 @@ function toSettingsDto(s: Awaited<ReturnType<typeof getSettings>>): SettingsDto 
   return {
     autoAcknowledge: { enabled: s.autoAcknowledge?.enabled ?? false, templateId: str(s.autoAcknowledge?.templateId) },
     resolutionEmail: { enabled: s.resolutionEmail?.enabled ?? false, templateId: str(s.resolutionEmail?.templateId) },
+    autoResolveEmail: {
+      enabled: s.autoResolveEmail?.enabled ?? false,
+      templateId: str(s.autoResolveEmail?.templateId),
+    },
     markReadOnResolve: s.markReadOnResolve ?? false,
     roundRobinEnabled: s.roundRobinEnabled,
     defaultPool: (s.defaultPool ?? []).map(String),
@@ -281,6 +285,7 @@ const SettingsBody = z
   .object({
     autoAcknowledge: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
     resolutionEmail: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
+    autoResolveEmail: z.object({ enabled: z.boolean(), templateId: objectId.nullable() }),
     markReadOnResolve: z.boolean(),
     roundRobinEnabled: z.boolean(),
     defaultPool: z.array(objectId).max(100),
@@ -318,6 +323,12 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
   if (body.resolutionEmail?.templateId && !(await TemplateModel.exists({ _id: body.resolutionEmail.templateId }))) {
     throw new HttpError(400, 'Template not found');
   }
+  if (body.autoResolveEmail?.enabled && !body.autoResolveEmail.templateId) {
+    throw new HttpError(400, 'Choose the template to send before turning on the auto-resolve email');
+  }
+  if (body.autoResolveEmail?.templateId && !(await TemplateModel.exists({ _id: body.autoResolveEmail.templateId }))) {
+    throw new HttpError(400, 'Template not found');
+  }
   const current = await getSettings();
   const storedPool = (current.defaultPool ?? []).map(String);
   const pool = body.defaultPool ?? storedPool;
@@ -335,6 +346,10 @@ automationRouter.patch('/settings', ...admins, async (req, res) => {
         ...(body.resolutionEmail && {
           'resolutionEmail.enabled': body.resolutionEmail.enabled,
           'resolutionEmail.templateId': oid(body.resolutionEmail.templateId),
+        }),
+        ...(body.autoResolveEmail && {
+          'autoResolveEmail.enabled': body.autoResolveEmail.enabled,
+          'autoResolveEmail.templateId': oid(body.autoResolveEmail.templateId),
         }),
         ...(body.markReadOnResolve !== undefined && { markReadOnResolve: body.markReadOnResolve }),
         ...(body.roundRobinEnabled !== undefined && { roundRobinEnabled: body.roundRobinEnabled }),

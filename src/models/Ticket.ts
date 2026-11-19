@@ -1,7 +1,7 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 import { NOT_ENQUIRY_REASONS, TICKET_ORIGINS, TICKET_PRIORITIES, TICKET_STATUSES } from '../shared.js';
 import { notifyTicketChanged } from '../services/realtime/changes.js';
-import { shouldClearStatusReason } from '../services/tickets/followUpRules.js';
+import { shouldClearAutoResolve, shouldClearStatusReason } from '../services/tickets/followUpRules.js';
 
 const addressSchema = new Schema(
   { name: { type: String, default: '' }, email: { type: String, default: '' }, phone: { type: String, default: '' } },
@@ -51,6 +51,14 @@ const ticketSchema = new Schema(
     escalatedToId: { type: Schema.Types.ObjectId, ref: 'Department', default: null },
     escalatedAt: { type: Date, default: null },
     followUp: { type: followUpSchema, default: null },
+    // "Resolve if no reply in N days": the job resolves it at `at` while it's still awaiting the shareholder.
+    autoResolve: {
+      type: new Schema(
+        { at: { type: Date, required: true }, setById: { type: Schema.Types.ObjectId, ref: 'User', default: null } },
+        { _id: false },
+      ),
+      default: null,
+    },
 
     // List-pane helpers, kept in step whenever a message is added.
     isUnread: { type: Boolean, required: true, default: true },
@@ -86,6 +94,7 @@ ticketSchema.index({ otherConversationIds: 1 });
 ticketSchema.index({ isOverdue: 1, slaDueAt: 1 });
 ticketSchema.index({ deletedAt: 1 });
 ticketSchema.index({ 'followUp.at': 1 }, { sparse: true });
+ticketSchema.index({ 'autoResolve.at': 1 }, { sparse: true });
 // Reports (by when an enquiry was received, answered, resolved) and the empty-ticket cleanup.
 ticketSchema.index({ createdAt: 1 });
 ticketSchema.index({ slaStartAt: 1 });
@@ -99,6 +108,7 @@ ticketSchema.pre('save', function () {
     this.statusReasonId = null;
   }
   if (this.isModified('status') && this.status === 'resolved') this.followUp = null;
+  if (shouldClearAutoResolve(this.isModified('status'), this.status)) this.autoResolve = null;
 });
 
 // Every saved change (new mail, assignment, status, SLA…) is pushed to open browsers so lists and

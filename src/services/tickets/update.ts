@@ -9,6 +9,7 @@ import { UserModel, type UserDoc } from '../../models/User.js';
 import { logger } from '../../lib/logger.js';
 import { markMailRead, sendResolutionEmail } from '../automation/autoAck.js';
 import { applySla } from '../automation/sla.js';
+import { autoResolveAt } from './followUpRules.js';
 import { getStatusReasons } from './statusReasons.js';
 import type { BulkPatch, TicketPatch } from './patchSchema.js';
 
@@ -40,12 +41,18 @@ export async function checkPatch(patch: TicketPatch | BulkPatch, now = new Date(
   if (patch.followUp && new Date(patch.followUp.at).getTime() <= now.getTime()) {
     throw new HttpError(400, 'Choose a follow-up time in the future');
   }
+  if (patch.autoResolveDays && patch.status && patch.status !== 'awaiting_shareholder') {
+    throw new HttpError(400, 'Auto-resolve keeps the enquiry in Awaiting shareholder');
+  }
 
   if (!patch.statusReasonId) return null;
   const reason = (await getStatusReasons()).get(patch.statusReasonId);
   if (!reason?.isActive) throw new HttpError(400, 'That stage does not exist or has been retired');
   if (patch.status && patch.status !== reason.baseStatus) {
     throw new HttpError(400, 'That stage belongs to a different status');
+  }
+  if (patch.autoResolveDays && reason.baseStatus !== 'awaiting_shareholder') {
+    throw new HttpError(400, 'Auto-resolve keeps the enquiry in Awaiting shareholder');
   }
   return reason;
 }
@@ -68,8 +75,12 @@ export async function applyTicketPatch(
   const track = (field: string, before: unknown, after: unknown) => {
     if (String(before) !== String(after)) changes[field] = { before, after };
   };
-  // Choosing a stage chooses its status too.
-  const status = reason ? reason.baseStatus : patch.status;
+  // Choosing a stage chooses its status too; setting an auto-resolve means we're waiting on the shareholder.
+  let status = reason ? reason.baseStatus : patch.status;
+  if (patch.autoResolveDays) {
+    if ((status ?? ticket.status) === 'resolved') throw new HttpError(400, 'This enquiry is already resolved');
+    status = 'awaiting_shareholder';
+  }
 
   if (patch.assigneeId !== undefined) {
     const current = ticket.assigneeId?.toString() ?? null;
@@ -129,6 +140,15 @@ export async function applyTicketPatch(
     }
   }
 
+  // After the status change, which clears any auto-resolve when it leaves Awaiting shareholder.
+  if (patch.autoResolveDays !== undefined) {
+    const before = ticket.autoResolve?.at.toISOString() ?? null;
+    ticket.autoResolve = patch.autoResolveDays
+      ? { at: autoResolveAt(new Date(), patch.autoResolveDays), setById: user._id }
+      : null;
+    track('autoResolve', before, ticket.autoResolve?.at.toISOString() ?? null);
+  }
+
   // Read state is a view preference, not a change to the enquiry, so it isn't audited.
   if (patch.isUnread !== undefined) ticket.isUnread = patch.isUnread;
 
@@ -139,7 +159,9 @@ export async function applyTicketPatch(
     await audit({ actorId: user._id, action: 'ticket.updated', ticketId: ticket._id, meta: changes });
   }
   if (changes.status && ticket.status === 'resolved') {
-    markMailRead(ticket).catch((err: unknown) => logger.error({ err, ticket: ticket.reference }, 'Mark mail read failed'));
+    markMailRead(ticket).catch((err: unknown) =>
+      logger.error({ err, ticket: ticket.reference }, 'Mark mail read failed'),
+    );
   }
   if (opts.notifyContact && changes.status && ticket.status === 'resolved') {
     // In the background: a mail failure is logged and audited, never blocks the resolve.

@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  autoResolveAt,
+  autoResolvesDueFilter,
+  shouldClearAutoResolve,
   followUpsDueFilter,
   isSnoozed,
   shouldClearStatusReason,
@@ -96,5 +99,23 @@ describe('not an enquiry', () => {
       reason: 'cc_info',
       note: '',
     });
+  });
+});
+
+describe('auto-resolve', () => {
+  it('accepts only the offered periods, and null to cancel', () => {
+    assert.equal(PatchBody.parse({ autoResolveDays: 7 }).autoResolveDays, 7);
+    assert.equal(PatchBody.parse({ autoResolveDays: null }).autoResolveDays, null);
+    assert.throws(() => PatchBody.parse({ autoResolveDays: 4 }));
+  });
+  it('falls due after calendar days, only while awaiting the shareholder', () => {
+    assert.equal(autoResolveAt(now, 3).toISOString(), '2026-10-23T10:00:00.000Z');
+    assert.equal(autoResolvesDueFilter(now).status, 'awaiting_shareholder');
+  });
+  it('is cancelled when the status moves anywhere but Awaiting shareholder', () => {
+    assert.equal(shouldClearAutoResolve(true, 'in_progress'), true);
+    assert.equal(shouldClearAutoResolve(true, 'resolved'), true);
+    assert.equal(shouldClearAutoResolve(true, 'awaiting_shareholder'), false);
+    assert.equal(shouldClearAutoResolve(false, 'in_progress'), false);
   });
 });

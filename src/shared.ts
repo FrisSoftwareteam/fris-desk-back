@@ -28,6 +28,10 @@ export const OPEN_TICKET_STATUSES: readonly TicketStatus[] = [
 export const TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
 
+/** Days an officer can choose before an enquiry awaiting the shareholder resolves itself. */
+export const AUTO_RESOLVE_DAYS = [3, 5, 7, 14] as const;
+export type AutoResolveDays = (typeof AUTO_RESOLVE_DAYS)[number];
+
 export const PRIORITY_LABELS: Record<TicketPriority, string> = {
   low: 'Low',
   normal: 'Normal',
@@ -171,6 +175,8 @@ export interface TicketSummaryDto {
   notEnquiry: { reason: NotEnquiryReason; note: string } | null;
   /** A call-back or reminder an officer set (G-04.3); null when there is none. */
   followUp: FollowUpDto | null;
+  /** Resolves itself at `at` unless the shareholder replies first; null when not set. */
+  autoResolve: { at: string; setBy: Pick<UserDto, 'id' | 'displayName'> | null } | null;
 }
 
 export interface FollowUpDto {
@@ -307,6 +313,9 @@ export interface TicketPatchDto {
   statusReasonId?: string | null;
   /** Null clears the follow-up. `at` must be in the future. */
   followUp?: { at: string; note?: string; hide: boolean } | null;
+  /** Resolve automatically after this many days without a shareholder reply (moves it to Awaiting
+   *  shareholder); null cancels. */
+  autoResolveDays?: AutoResolveDays | null;
 }
 
 /** POST /api/tickets/bulk — one change applied to several enquiries (G-04.2). */
@@ -487,6 +496,8 @@ export interface SettingsDto {
   autoAcknowledge: { enabled: boolean; templateId: string | null };
   /** Email to the shareholder when an officer resolves their enquiry (asks them to confirm). */
   resolutionEmail: { enabled: boolean; templateId: string | null };
+  /** Email to the shareholder when an enquiry resolves itself for lack of a reply. */
+  autoResolveEmail: { enabled: boolean; templateId: string | null };
   /** Mark an enquiry's inbound emails read in the shared mailbox when it's resolved. */
   markReadOnResolve: boolean;
   /** Master switch for automatic assignment (rules' officer pools and the default pool). */

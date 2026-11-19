@@ -18,7 +18,7 @@ export async function loadNames(ids: (Types.ObjectId | null | undefined)[]): Pro
 
 /** Names for everyone a list of enquiries mentions (assignee, who deleted it, who set a follow-up). */
 export function namesForTickets(tickets: TicketDoc[]): Promise<NameMap> {
-  return loadNames(tickets.flatMap((t) => [t.assigneeId, t.deletedById, t.followUp?.setById]));
+  return loadNames(tickets.flatMap((t) => [t.assigneeId, t.deletedById, t.followUp?.setById, t.autoResolve?.setById]));
 }
 
 function person(id: Types.ObjectId | null | undefined, names: NameMap) {
@@ -71,6 +71,9 @@ export function toTicketSummary(
           setBy: person(t.followUp.setById, names),
         }
       : null,
+    autoResolve: t.autoResolve
+      ? { at: t.autoResolve.at.toISOString(), setBy: person(t.autoResolve.setById, names) }
+      : null,
   };
 }
 
@@ -80,7 +83,13 @@ export async function toTicketDetail(t: TicketDoc, messages: MessageDoc[]): Prom
     createdAt: 1,
   });
   const [names, attachments, settings] = await Promise.all([
-    loadNames([t.assigneeId, t.deletedById, t.followUp?.setById, ...messages.map((m) => m.authorId)]),
+    loadNames([
+      t.assigneeId,
+      t.deletedById,
+      t.followUp?.setById,
+      t.autoResolve?.setById,
+      ...messages.map((m) => m.authorId),
+    ]),
     attachmentStore.getMeta([...messages.flatMap((m) => m.attachmentIds), ...pending.flatMap((p) => p.attachmentIds)]),
     getSettings(),
   ]);

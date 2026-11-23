@@ -680,6 +680,8 @@ export interface ReportQuery {
 export interface ReportSummaryDto {
   received: number;
   openNow: number;
+  /** Of openNow, those with no assignee (the routing backlog). */
+  unassignedNow: number;
   resolved: number;
   overdueNow: number;
   avgFirstResponseMins: number | null;

@@ -80,12 +80,13 @@ const waitStart = (t: { slaStartAt?: Date | null; createdAt: Date }) => t.slaSta
 export async function reportSummary(f: ReportFilters): Promise<ReportSummaryDto> {
   const scope = ticketScope(f);
   const hours = await reportBusinessHours();
-  const [received, openNow, overdueNow, responded, resolved] = await Promise.all([
+  const [received, openNow, unassignedNow, overdueNow, responded, resolved] = await Promise.all([
     TicketModel.aggregate<{ _id: TicketOrigin; n: number }>([
       { $match: { ...scope, ...arrivedIn(f) } },
       { $group: { _id: '$origin', n: { $sum: 1 } } },
     ]),
     TicketModel.countDocuments({ ...scope, status: { $ne: 'resolved' } }),
+    f.agentId ? 0 : TicketModel.countDocuments({ ...scope, assigneeId: null, status: { $ne: 'resolved' } }),
     TicketModel.countDocuments({ ...scope, status: { $ne: 'resolved' }, isOverdue: true }),
     TicketModel.find(
       { ...scope, firstResponseAt: range(f) },
@@ -100,6 +101,7 @@ export async function reportSummary(f: ReportFilters): Promise<ReportSummaryDto>
   return {
     received: received.reduce((a, r) => a + r.n, 0),
     openNow,
+    unassignedNow,
     resolved: resolved.length,
     overdueNow,
     avgFirstResponseMins: mean(responded.map((t) => businessMinutesBetween(waitStart(t), t.firstResponseAt!, hours))),

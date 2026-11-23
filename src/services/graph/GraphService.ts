@@ -9,6 +9,8 @@ import {
 } from '@microsoft/microsoft-graph-client';
 import type { Attachment, Message, MailFolder, Subscription } from '@microsoft/microsoft-graph-types';
 import { env } from '../../config/env.js';
+import type { EmailAddress } from '../../shared.js';
+import { directoryFilter, keepDomain } from './directory.js';
 
 // App-only (client-credentials) access to the shared mailbox (BUILD_SPEC §2, §8.3). The Exchange
 // Application Access Policy must limit this app to that one mailbox.
@@ -257,6 +259,17 @@ export class GraphService {
   /** Removes a draft we created but couldn't send, so it doesn't linger in the mailbox's Drafts. */
   async deleteMessage(messageId: string): Promise<void> {
     await this.client.api(`${this.base}/messages/${encodeURIComponent(messageId)}`).delete();
+  }
+
+  /** Colleagues on `domain` whose name or address starts with `q` (needs User.Read.All). */
+  async searchUsers(q: string, domain: string): Promise<EmailAddress[]> {
+    const page = await this.client
+      .api('/users')
+      .filter(directoryFilter(q))
+      .select('displayName,mail')
+      .top(25)
+      .get();
+    return keepDomain(page.value ?? [], domain);
   }
 
   // ── Change-notification subscriptions (push) ────────────────────────────────

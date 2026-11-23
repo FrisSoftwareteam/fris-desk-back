@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { CATEGORY_TYPES, TICKET_STATUSES } from '../shared.js';
-import { HttpError, parseBody, parsePatch } from '../lib/http.js';
+import { HttpError, escapeRegex, parseBody, parsePatch } from '../lib/http.js';
 import { audit } from '../models/AuditLog.js';
 import { TicketModel } from '../models/Ticket.js';
 import type { CategoryDto, FolderDto, MailboxStatusDto, StaffDto } from '../shared.js';
@@ -17,6 +17,9 @@ import { currentSyncProblem } from '../services/mail/sync.js';
 import { StatusReasonModel } from '../models/StatusReason.js';
 import { invalidateStatusReasons, listStatusReasons } from '../services/tickets/statusReasons.js';
 import { notifyTicketChanged } from '../services/realtime/changes.js';
+import { getGraph } from '../services/graph/GraphService.js';
+import { logger } from '../lib/logger.js';
+import type { EmailAddress } from '../shared.js';
 
 // Read-only reference data for the mail screen. Admin CRUD for these arrives in Phases 4 and 7.
 export const lookupsRouter = Router();
@@ -54,6 +57,34 @@ lookupsRouter.get('/users', requireAuth, async (_req, res) => {
     email: u.email,
     role: u.role,
   }));
+  res.json(body);
+});
+
+const DirectoryQuery = z.string().trim().min(2).max(64);
+
+// Outlook-style To/Cc suggestions: colleagues on the firm's domain (the shared mailbox's domain).
+lookupsRouter.get('/directory', requireAuth, async (req, res) => {
+  const q = DirectoryQuery.safeParse(req.query.q);
+  if (!q.success) return void res.json([]);
+  const graph = getGraph();
+  const domain = env.GRAPH_SHARED_MAILBOX?.split('@')[1];
+  if (graph && domain) {
+    try {
+      const body: EmailAddress[] = await graph.searchUsers(q.data, domain);
+      return void res.json(body);
+    } catch (err) {
+      // Suggestions are a convenience; never block composing over them.
+      logger.warn({ err }, 'Directory search failed');
+      return void res.json([]);
+    }
+  }
+  // No Graph (local dev): suggest active staff instead.
+  const re = new RegExp(`^${escapeRegex(q.data)}`, 'i');
+  const users = await UserModel.find({ isActive: true, ...visibleUsers, $or: [{ displayName: re }, { email: re }] })
+    .sort({ displayName: 1 })
+    .limit(10)
+    .lean();
+  const body: EmailAddress[] = users.map((u) => ({ name: u.displayName, email: u.email }));
   res.json(body);
 });
 

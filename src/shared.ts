@@ -277,6 +277,7 @@ export const SYSTEM_VIEWS = [
   'unassigned',
   'overdue',
   'escalated',
+  'awaiting',
   'followups',
   'drafts',
   'deleted',
@@ -293,7 +294,7 @@ export interface TicketListResponse {
 /** GET /api/tickets/counts — numbers shown beside views and folders in the folder pane. */
 export interface TicketCountsDto {
   /**
-   * Unread count per system view (Overdue, Drafts and Deleted are totals; Follow-ups counts those
+   * Unread count per system view (Overdue, Awaiting, Drafts and Deleted are totals; Follow-ups counts those
    * now due). Deleted and Not enquiries are 0 for agents.
    */
   views: Record<SystemView, number>;

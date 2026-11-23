@@ -169,6 +169,8 @@ function viewFilter(
       return { isOverdue: true, status: { $ne: 'resolved' } };
     case 'escalated':
       return escalated;
+    case 'awaiting':
+      return { status: 'awaiting_shareholder' };
     case 'followups':
       // Every enquiry with a follow-up set, snoozed or not (G-04.3).
       return { followUp: { $ne: null } };
@@ -295,6 +297,7 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
     mentions,
     approvals,
     escalated,
+    awaiting,
   ] = await Promise.all([
     TicketModel.countDocuments(unread),
     TicketModel.countDocuments({ ...unread, assigneeId: user._id }),
@@ -316,6 +319,7 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
     ),
     awaitingApprovalTicketIds(user).then((ids) => TicketModel.countDocuments({ _id: { $in: ids }, deletedAt: null })),
     escalatedFilter(user).then((f) => TicketModel.countDocuments({ ...unread, ...f })),
+    TicketModel.countDocuments({ ...base, status: 'awaiting_shareholder', ...snoozedHiddenFilter(now) }),
   ]);
 
   const body: TicketCountsDto = {
@@ -327,6 +331,7 @@ ticketsRouter.get('/tickets/counts', async (req, res) => {
       unassigned,
       overdue,
       escalated,
+      awaiting,
       followups,
       drafts,
       deleted,

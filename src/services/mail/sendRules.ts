@@ -33,3 +33,25 @@ export function placeAboveQuote(draftHtml: string, ourHtml: string): string {
   const at = bodyTag.index + bodyTag[0].length;
   return `${draftHtml.slice(0, at)}${ourHtml}<br>${draftHtml.slice(at)}`;
 }
+
+/**
+ * Attachments a forward of the whole enquiry carries: every message's files, oldest first, once
+ * each, minus `exclude` (files the officer attached themself). Each is tagged with the mailbox
+ * message it came from, so the ones Graph already copied onto the forward draft can be skipped.
+ */
+export function threadAttachmentIds(
+  thread: { attachmentIds: { toString(): string }[]; graphMessageId?: string | null }[],
+  exclude: string[],
+): { id: string; fromGraphMessageId: string | null }[] {
+  const seen = new Set(exclude);
+  const out: { id: string; fromGraphMessageId: string | null }[] = [];
+  for (const m of thread) {
+    for (const raw of m.attachmentIds) {
+      const id = raw.toString();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, fromGraphMessageId: m.graphMessageId ?? null });
+    }
+  }
+  return out;
+}

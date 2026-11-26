@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderMergeFields } from '../src/shared.js';
-import { placeAboveQuote, recipientProblem, subjectWithReference } from '../src/services/mail/sendRules.ts';
+import { placeAboveQuote, recipientProblem, subjectWithReference, threadAttachmentIds } from '../src/services/mail/sendRules.ts';
 import { approvalReason } from '../src/services/mail/approvalRules.ts';
 
 const colin = { name: 'Colin', email: 'colin.decorce@firstregistrarsnigeria.com' };
@@ -120,5 +120,20 @@ describe('approvalReason (supervisor approval)', () => {
     assert.notEqual(approvalReason(all, { ...reply, kind: 'forward' }, names), null);
     assert.equal(approvalReason({ ...all, includeForwards: false }, { ...reply, kind: 'forward' }, names), null);
     assert.notEqual(approvalReason({ ...all, includeForwards: false }, { ...reply, kind: 'reply_all' }, names), null);
+  });
+});
+
+describe('forward attachments', () => {
+  it('takes every message\'s files oldest first, once each, minus the officer\'s own', () => {
+    const thread = [
+      { attachmentIds: ['a', 'b'], graphMessageId: 'g1' },
+      { attachmentIds: [], graphMessageId: null },
+      { attachmentIds: ['b', 'c', 'd'], graphMessageId: 'g2' },
+    ];
+    assert.deepEqual(threadAttachmentIds(thread, ['d']), [
+      { id: 'a', fromGraphMessageId: 'g1' },
+      { id: 'b', fromGraphMessageId: 'g1' },
+      { id: 'c', fromGraphMessageId: 'g2' },
+    ]);
   });
 });

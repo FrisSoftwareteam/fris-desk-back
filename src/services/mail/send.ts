@@ -16,7 +16,8 @@ import { htmlToText, makeSnippet, sanitizeEmailHtml, sanitizeNoteHtml } from './
 import { extractMentionIds } from '../notifications/mentions.js';
 import { notifyUsers } from '../notifications/notify.js';
 import { UserModel } from '../../models/User.js';
-import { placeAboveQuote, recipientProblem, subjectWithReference } from './sendRules.js';
+import { placeAboveQuote, recipientProblem, subjectWithReference, threadAttachmentIds } from './sendRules.js';
+import { AttachmentModel } from '../../models/Attachment.js';
 import { afterSend } from './afterSend.js';
 import { holdForApproval } from './approvalHold.js';
 import type { PendingReplyDoc } from '../../models/PendingReply.js';
@@ -46,7 +47,60 @@ export interface Delivery {
   cc: EmailAddress[];
   subject: string;
   bodyHtml: string;
-  attachments?: { name: string; contentType: string; data: Buffer }[];
+  attachments?: OutgoingFile[];
+}
+
+/** `fromGraphMessageId`: the mailbox message the file came from (Graph copies those onto a forward itself). */
+type OutgoingFile = { name: string; contentType: string; data: Buffer; fromGraphMessageId?: string | null };
+
+/** Reads stored attachments of this ticket for sending, one at a time: each may be up to 25 MB. */
+async function loadAttachments(
+  items: { id: string; fromGraphMessageId?: string | null }[],
+  ticketId: Types.ObjectId,
+  skipMissing = false,
+): Promise<OutgoingFile[]> {
+  const files: OutgoingFile[] = [];
+  for (const { id, fromGraphMessageId } of items) {
+    const file = await attachmentStore.open(id);
+    if (!file || (file.meta.ticketId && file.meta.ticketId !== ticketId.toString())) {
+      file?.stream.destroy();
+      if (skipMissing) {
+        logger.warn({ attachmentId: id, ticketId }, 'Thread attachment unavailable; forwarding without it');
+        continue;
+      }
+      throw new HttpError(400, 'An attachment could not be found. Remove it and attach it again.');
+    }
+    files.push({
+      name: file.meta.filename,
+      contentType: file.meta.contentType,
+      data: await readAll(file.stream),
+      fromGraphMessageId,
+    });
+  }
+  return files;
+}
+
+/**
+ * Every file on the enquiry's emails (not notes, not inline images such as signature logos), for a
+ * forward or escalation, so the recipient gets the documents from earlier emails too.
+ * shortcut: all files are held in memory before sending (Graph caps a message at ~150 MB); stream them if enquiries routinely get that big.
+ */
+export async function forwardFiles(ticketId: Types.ObjectId, exclude: string[]): Promise<OutgoingFile[]> {
+  const thread = await MessageModel.find(
+    { ticketId, direction: { $ne: 'note' } },
+    { attachmentIds: 1, graphMessageId: 1 },
+  ).sort({ sentAt: 1 });
+  const items = threadAttachmentIds(thread, exclude);
+  const inline = new Set(
+    (await AttachmentModel.find({ _id: { $in: items.map((i) => i.id) }, isInline: true }, { _id: 1 }).lean()).map(
+      (a) => a._id.toString(),
+    ),
+  );
+  return loadAttachments(
+    items.filter((i) => !inline.has(i.id)),
+    ticketId,
+    true,
+  );
 }
 
 /**
@@ -59,10 +113,12 @@ export async function deliverEmail(d: Delivery): Promise<string | null> {
   const graph = getGraph();
   if (!graph) throw new HttpError(503, 'Sending email is not configured on the server');
 
+  let fromBase = Boolean(d.baseGraphMessageId);
   const draft = d.baseGraphMessageId
     ? await graph.createResponseDraft(d.baseGraphMessageId, d.kind).catch((err: unknown) => {
         // The original was deleted or moved out of the Inbox: send as a new email instead.
         logger.warn({ err, ticket: d.ticketReference }, 'Original email unavailable; sending as a new message');
+        fromBase = false;
         return graph.createNewDraft();
       })
     : await graph.createNewDraft();
@@ -78,7 +134,11 @@ export async function deliverEmail(d: Delivery): Promise<string | null> {
         content: draft.body?.content ? placeAboveQuote(draft.body.content, d.bodyHtml) : d.bodyHtml,
       },
     });
-    for (const file of d.attachments ?? []) await graph.addDraftAttachment(draft.id, file);
+    for (const file of d.attachments ?? []) {
+      // createForward already copied the original's files onto the draft; don't send them twice.
+      if (fromBase && d.kind === 'forward' && file.fromGraphMessageId === d.baseGraphMessageId) continue;
+      await graph.addDraftAttachment(draft.id, file);
+    }
     await graph.sendDraft(draft.id);
     return updated.internetMessageId ?? null;
   } catch (err) {
@@ -166,16 +226,9 @@ export async function sendTicketMessage(
   const mailbox = getGraph()?.mailbox ?? '';
 
   const subject = subjectWithReference(renderMergeFields(input.subject, ctx), ticket.reference);
-  // One at a time: each may be up to 25 MB.
-  const attachments: { name: string; contentType: string; data: Buffer }[] = [];
-  for (const id of attachmentIds) {
-    const file = await attachmentStore.open(id.toString());
-    if (!file || (file.meta.ticketId && file.meta.ticketId !== ticket._id.toString())) {
-      file?.stream.destroy();
-      throw new HttpError(400, 'An attachment could not be found. Remove it and attach it again.');
-    }
-    attachments.push({ name: file.meta.filename, contentType: file.meta.contentType, data: await readAll(file.stream) });
-  }
+  const attachments = await loadAttachments(input.attachmentIds.map((id) => ({ id })), ticket._id);
+  // A forward carries the enquiry's earlier files too (kept off this message's own attachmentIds).
+  if (input.kind === 'forward') attachments.push(...(await forwardFiles(ticket._id, input.attachmentIds)));
 
   // Reply to the newest email the shareholder sent, so it threads under it in their mail app.
   const base = await MessageModel.findOne({ ticketId: ticket._id, graphMessageId: { $ne: null } }).sort({ sentAt: -1 });

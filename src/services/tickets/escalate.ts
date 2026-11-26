@@ -8,7 +8,7 @@ import { countMessages, type TicketDoc } from '../../models/Ticket.js';
 import type { UserDoc } from '../../models/User.js';
 import { applySla } from '../automation/sla.js';
 import { afterSend } from '../mail/afterSend.js';
-import { assertRecipientsAllowed, deliverEmail } from '../mail/send.js';
+import { assertRecipientsAllowed, deliverEmail, forwardFiles } from '../mail/send.js';
 import { subjectWithReference } from '../mail/sendRules.js';
 import { escapeHtml, threadTranscript, who } from './transcript.js';
 
@@ -17,8 +17,8 @@ import { escapeHtml, threadTranscript, who } from './transcript.js';
  * department or person, with the officer's note on top; records an internal note; marks the
  * enquiry escalated; audits. Sending is subject to MAIL_SEND_ALLOWLIST like every other email.
  *
- * The newest email from the mailbox is forwarded through Graph (so its attachments go too) and the
- * earlier messages are written out beneath the note. A phone/walk-in enquiry, with nothing in the
+ * The newest email from the mailbox is forwarded through Graph and the earlier messages are written
+ * out beneath the note; the files from every email in the thread are attached. A phone/walk-in enquiry, with nothing in the
  * mailbox to forward, goes as a new email carrying the whole thread.
  */
 export async function escalateTicket(
@@ -58,6 +58,7 @@ export async function escalateTicket(
     cc,
     subject: subjectWithReference(subject, ticket.reference),
     bodyHtml,
+    attachments: await forwardFiles(ticket._id, []),
   });
 
   const now = new Date();
